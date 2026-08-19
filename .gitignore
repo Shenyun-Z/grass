@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+nllb_model/
+configs/
+*.egg-info/
+.eggs/
+dist/
+build/
+.vscode/
+.idea/

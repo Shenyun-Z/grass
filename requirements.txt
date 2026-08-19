@@ -1,0 +1,5 @@
+torch
+transformers
+customtkinter
+openpyxl
+pytest
