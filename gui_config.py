@@ -38,7 +38,8 @@ class ConfigMixin:
         name = name.strip()
         langs = [v.get() for v in self._lang_vars]
         final = self._final_lang_var.get()
-        data = {"langs": langs, "final": final, "rounds": self._rounds_var.get()}
+        data = {"langs": langs, "final": final, "rounds": self._rounds_var.get(),
+                "split_puncts": self._split_puncts}
         path = os.path.join(self.CONFIG_DIR, f"{name}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -87,6 +88,9 @@ class ConfigMixin:
                 var.set(langs[i])
         self._final_lang_var.set(final)
         self._FINAL_LANG = final
+        split_puncts = data.get("split_puncts")
+        if split_puncts is not None:
+            self._split_puncts = split_puncts
         self._update_chain_label()
         self._on_input_change()
         self._show_toast(f"已加载配置「{name}」")
@@ -142,6 +146,9 @@ class ConfigMixin:
                 var.set(langs[i])
         self._final_lang_var.set(final)
         self._FINAL_LANG = final
+        split_puncts = data.get("split_puncts")
+        if split_puncts is not None:
+            self._split_puncts = split_puncts
         self._update_chain_label()
         self._on_input_change()
         self._show_toast(f"已导入并应用配置「{name}」")

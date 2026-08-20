@@ -51,17 +51,19 @@ class TranslateMixin:
 
         t = threading.Thread(
             target=self._run_translate,
-            args=(self._raw_text, rounds, pivot_langs, threshold, mode_arg, excluded),
+            args=(self._raw_text, rounds, pivot_langs, threshold, mode_arg, excluded, self._split_puncts),
             daemon=True)
         t.start()
         self._poll_queue()
 
-    def _run_translate(self, text, rounds, pivot_langs, threshold, random_mode="off", excluded_langs=None):
+    def _run_translate(self, text, rounds, pivot_langs, threshold, random_mode="off",
+                       excluded_langs=None, split_puncts=None):
         q = self._msg_queue
         try:
             for msg in grass_translate(
                     text, rounds, pivot_langs, self._FINAL_LANG, threshold,
-                    random_mode=random_mode, excluded_langs=excluded_langs or []):
+                    random_mode=random_mode, excluded_langs=excluded_langs or [],
+                    split_puncts=split_puncts):
                 if self._STOP_EVENT.is_set():
                     q.put(("aborted",))
                     return
@@ -123,6 +125,8 @@ class TranslateMixin:
                 info, counter = self._split_view.get_info()
                 self._split_info.configure(text=info)
                 self._seg_counter.configure(text=counter)
+            if getattr(self, "_result_view", "结果") == "对照":
+                self._render_compare_view()
             self._animate_progress((si + 1) / len(self._segments))
         elif kind == "done":
             self._running = False
@@ -140,6 +144,7 @@ class TranslateMixin:
                 self.clipboard_clear()
                 self.clipboard_append(result_text)
                 self._show_toast(f"翻译完成 ({time_str})，结果已复制到剪贴板")
+            self._add_history_entry(stopped=False, elapsed_str=time_str)
         elif kind == "aborted":
             self._running = False
             self._set_params_enabled(True)
@@ -147,6 +152,8 @@ class TranslateMixin:
             self._animate_btn_color(self._start_btn, COLORS["accent"], COLORS["accent_hover"])
             self._status_label.configure(text="⏹ 已停止", text_color=COLORS["text_secondary"])
             self.title("生草机")
+            if self._seg_results:
+                self._add_history_entry(stopped=True)
         elif kind == "error":
             self._running = False
             self._set_params_enabled(True)

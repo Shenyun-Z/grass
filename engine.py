@@ -13,6 +13,9 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_MAP
 
+# 默认切分标点集合：中文/英文的常见句读标点
+DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
+
 _MODEL = None
 _TOKENIZER = None
 _MODEL_PATH = os.environ.get("NLLB_MODEL_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "nllb_model")
@@ -69,25 +72,28 @@ def _preprocess(text: str) -> str:
     return " ".join(non_empty)
 
 
-def _split_by_threshold(text: str, threshold: int = 20) -> List[str]:
+def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = None) -> List[str]:
     """按阈值分割文本
     
     Args:
         text: 待分割文本
         threshold: 每段最大字符数
+        puncts: 切分标点集合。None 时使用 DEFAULT_SPLIT_PUNCTS；
+                传空字符串表示禁用标点切分（仅按阈值硬切）
         
     Returns:
         分割后的文本段列表
     """
     if not text:
         return []
-        
+    punct_set = DEFAULT_SPLIT_PUNCTS if puncts is None else puncts
+
     segments = []
     start = 0
     cnt = 0
     for i, ch in enumerate(text):
         cnt += 1
-        if ch in "，,。":
+        if ch in punct_set:
             if cnt >= threshold:
                 segments.append(text[start:i + 1])
                 start = i + 1
@@ -109,7 +115,8 @@ def grass_translate(
     final_lang: str, 
     threshold: int = 20, 
     random_mode: str = "off", 
-    excluded_langs: Optional[List[str]] = None
+    excluded_langs: Optional[List[str]] = None,
+    split_puncts: Optional[str] = None
 ) -> Generator[Tuple, None, None]:
     """执行完整的生草翻译流程
     
@@ -121,12 +128,13 @@ def grass_translate(
         threshold: 分段阈值
         random_mode: 随机模式 ("off", "low", "high")
         excluded_langs: 排除的语言列表
+        split_puncts: 切分标点集合（None 使用默认集合）
         
     Yields:
         翻译进度和结果元组
     """
     text = _preprocess(text)
-    segments = _split_by_threshold(text, threshold)
+    segments = _split_by_threshold(text, threshold, split_puncts)
 
     all_langs = [k for k in LANG_MAP if k not in ("中文", "中文（简体）", "中文（繁体）")]
     major_langs = list(DEFAULT_PIVOT_LANGS)

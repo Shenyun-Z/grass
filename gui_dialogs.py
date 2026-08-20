@@ -7,6 +7,18 @@ import customtkinter as ctk
 from gui_styles import COLORS, FONTS, style_card, style_btn
 from languages import LANG_GROUPS, LANG_MAP, PRESETS
 
+# 切分标点预设组：(组名, 包含的字符)
+PUNCT_GROUPS = [
+    ("逗号", "，,"),
+    ("句号", "。。."),
+    ("叹号", "！！"),
+    ("问号", "？?"),
+    ("分号", "；;"),
+    ("冒号", "：:"),
+    ("顿号", "、"),
+]
+_PRESET_CHARS = "".join(chars for _, chars in PUNCT_GROUPS)
+
 
 class LangSelectDialog(ctk.CTkToplevel):
     def __init__(self, master, on_select, disabled_langs=()):
@@ -438,4 +450,324 @@ class DeleteConfigDialog(ctk.CTkToplevel):
         to_delete = [name for name, var in self._vars.items() if var.get()]
         if to_delete:
             self._on_delete(to_delete)
+        self.destroy()
+
+
+class HistoryDialog(ctk.CTkToplevel):
+    """历史记录对话框：左侧记录列表 + 右侧详情（原文/结果/参数）
+
+    支持复制结果、删除单条、清空全部，以及「对照查看」——
+    将主窗口切换到对照视图并与该条记录对比。
+    """
+
+    def __init__(self, master, history, on_compare=None, on_delete=None, on_clear=None):
+        super().__init__(master)
+        self.title("历史记录")
+        self.geometry("920x580")
+        self.resizable(True, True)
+        self.minsize(720, 440)
+        self.transient(master)
+        self.grab_set()
+        self.configure(fg_color=COLORS["bg"])
+        self._history = history  # 与主应用共享同一列表对象（原地修改）
+        self._on_compare = on_compare
+        self._on_delete = on_delete
+        self._on_clear = on_clear
+        self._selected_id = None
+        self._restore_after_id = None
+        self.after(50, self._bring_front)
+
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(14, 8))
+        self._count_label = ctk.CTkLabel(header, text="", font=FONTS["section"](),
+                                         text_color=COLORS["text"])
+        self._count_label.pack(side="left")
+        style_btn(header, "清空历史", self._clear, width=80, height=26,
+                  font=FONTS["caption"](),
+                  fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["error"]).pack(side="right")
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        body.grid_columnconfigure(0, weight=0, minsize=280)
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+
+        self._list_frame = ctk.CTkScrollableFrame(body, fg_color=COLORS["bg"])
+        self._list_frame.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
+
+        self._detail = style_card(body, corner_radius=6)
+        self._detail.grid(row=0, column=1, sticky="nsew")
+        self._detail.grid_columnconfigure(0, weight=1)
+
+        self._show_placeholder()
+        self._rebuild_list()
+
+    def _bring_front(self):
+        try:
+            if self.winfo_exists():
+                self.lift()
+                self.focus_force()
+        except Exception:
+            pass
+
+    def destroy(self):
+        """销毁前取消未触发的回调，避免访问已销毁的控件"""
+        try:
+            if self._restore_after_id is not None:
+                self.after_cancel(self._restore_after_id)
+                self._restore_after_id = None
+        except Exception:
+            pass
+        super().destroy()
+
+    # ===== 列表 =====
+    def _rebuild_list(self):
+        self._count_label.configure(text=f"历史记录（{len(self._history)}）")
+        for w in self._list_frame.winfo_children():
+            w.destroy()
+        if not self._history:
+            ctk.CTkLabel(self._list_frame, text="暂无记录",
+                         font=FONTS["caption"](),
+                         text_color=COLORS["text_secondary"]).pack(pady=12)
+            return
+        for rec in reversed(self._history):  # 最新在前
+            mark = " ⏹" if rec.get("stopped") else ""
+            summary = rec["input"].replace("\n", " ")
+            if len(summary) > 24:
+                summary = summary[:24] + "…"
+            text = f"#{rec['id']}  {rec['date']} {rec['time']}{mark}\n{summary}"
+            selected = (rec["id"] == self._selected_id)
+            row = ctk.CTkButton(
+                self._list_frame, text=text, anchor="w",
+                height=44, font=FONTS["caption"](),
+                fg_color=COLORS["accent"] if selected else COLORS["surface_hover"],
+                hover_color=COLORS["accent_hover"],
+                text_color="white" if selected else COLORS["text"],
+                corner_radius=6,
+                command=lambda r=rec: self._select(r))
+            row.pack(fill="x", pady=2)
+
+    def _select(self, rec):
+        self._selected_id = rec["id"]
+        self._rebuild_list()
+        self._show_detail(rec)
+
+    # ===== 详情 =====
+    def _show_placeholder(self):
+        for w in self._detail.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self._detail, text="← 选择一条记录查看详情",
+                     font=FONTS["body"](),
+                     text_color=COLORS["text_secondary"]).pack(expand=True)
+
+    def _show_detail(self, rec):
+        for w in self._detail.winfo_children():
+            w.destroy()
+
+        p = rec["params"]
+        mode = p.get("mode", "-")
+        stopped = " · 已停止" if rec.get("stopped") else ""
+        info = (f"#{rec['id']} · {rec['date']} {rec['time']} · "
+                f"{p.get('rounds', '-')}轮 {mode} · 译回{p.get('final', '-')} · "
+                f"段字数{p.get('threshold', '-')}{stopped}")
+        if rec.get("elapsed"):
+            info += f" · 耗时{rec['elapsed']}"
+        ctk.CTkLabel(self._detail, text=info, font=FONTS["caption"](),
+                     text_color=COLORS["text_secondary"], anchor="w",
+                     justify="left").grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
+
+        ctk.CTkLabel(self._detail, text="原文", font=FONTS["caption"](),
+                     text_color=COLORS["accent"], anchor="w").grid(
+            row=1, column=0, sticky="w", padx=12, pady=(4, 2))
+        src_frame = ctk.CTkScrollableFrame(self._detail, height=110, fg_color=COLORS["bg"])
+        src_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
+        ctk.CTkLabel(src_frame, text=rec["input"] or "（空）", font=FONTS["body"](),
+                     text_color=COLORS["text"], wraplength=480,
+                     justify="left").pack(anchor="w", padx=8, pady=6)
+
+        ctk.CTkLabel(self._detail, text="结果", font=FONTS["caption"](),
+                     text_color=COLORS["success"], anchor="w").grid(
+            row=3, column=0, sticky="w", padx=12, pady=(4, 2))
+        res_frame = ctk.CTkScrollableFrame(self._detail, height=140, fg_color=COLORS["bg"])
+        res_frame.grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 6))
+        ctk.CTkLabel(res_frame, text=rec["result"] or "（空）", font=FONTS["body"](),
+                     text_color=COLORS["text"], wraplength=480,
+                     justify="left").pack(anchor="w", padx=8, pady=6)
+
+        btn_row = ctk.CTkFrame(self._detail, fg_color="transparent")
+        btn_row.grid(row=5, column=0, sticky="ew", padx=12, pady=(2, 10))
+
+        self._copy_btn = style_btn(btn_row, "复制结果", lambda: self._copy_result(rec),
+                                   width=85, height=28, font=FONTS["body"]())
+        self._copy_btn.pack(side="left")
+        style_btn(btn_row, "对照查看", lambda: self._compare(rec),
+                  width=85, height=28, font=FONTS["body"](),
+                  fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["accent"]).pack(side="left", padx=(6, 0))
+        style_btn(btn_row, "删除此条", lambda: self._delete(rec),
+                  width=85, height=28, font=FONTS["body"](),
+                  fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["error"]).pack(side="right")
+
+    # ===== 操作 =====
+    def _copy_result(self, rec):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(rec["result"])
+        except Exception:
+            return
+        btn = getattr(self, "_copy_btn", None)
+        if btn is not None:
+            btn.configure(text="已复制", state="disabled")
+
+            def _restore():
+                try:
+                    if btn.winfo_exists():
+                        btn.configure(text="复制结果", state="normal")
+                except Exception:
+                    pass
+            self._restore_after_id = self.after(1500, _restore)
+
+    def _compare(self, rec):
+        if self._on_compare:
+            self._on_compare(rec["id"])
+        self.destroy()
+
+    def _delete(self, rec):
+        if self._on_delete:
+            self._on_delete(rec["id"])
+        self._selected_id = None
+        self._rebuild_list()
+        self._show_placeholder()
+
+    def _clear(self):
+        if not self._history:
+            return
+        if self._on_clear:
+            self._on_clear()
+        self._selected_id = None
+        self._rebuild_list()
+        self._show_placeholder()
+
+
+class SplitPunctDialog(ctk.CTkToplevel):
+    """切分标点设置对话框：预设标点分组勾选 + 自定义分隔符"""
+
+    def __init__(self, master, puncts, on_confirm):
+        super().__init__(master)
+        self.title("切分标点设置")
+        self.geometry("460x440")
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        self.configure(fg_color=COLORS["bg"])
+        self._on_confirm = on_confirm
+        self.after(50, self._bring_front)
+
+        ctk.CTkLabel(
+            self, text="分段时累计达到「段字数」阈值后，在最近的一个所选标点处切分。",
+            font=FONTS["caption"](), text_color=COLORS["text_secondary"],
+            wraplength=420, justify="left").pack(anchor="w", padx=16, pady=(14, 8))
+
+        grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        grid_frame.pack(fill="x", padx=16, pady=(0, 8))
+        for col in range(4):
+            grid_frame.grid_columnconfigure(col, weight=1)
+
+        selected = set(puncts or "")
+        self._vars = []
+        for i, (name, chars) in enumerate(PUNCT_GROUPS):
+            var = ctk.BooleanVar(value=set(chars).issubset(selected))
+            var.trace_add("write", lambda *_: self._update_preview())
+            self._vars.append((var, chars))
+            cb = ctk.CTkCheckBox(
+                grid_frame, text=f"{name} {''.join(chars)}", variable=var,
+                font=FONTS["caption"](), checkbox_width=16, checkbox_height=16,
+                fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+                border_color=COLORS["border"], text_color=COLORS["text"])
+            cb.grid(row=i // 4, column=i % 4, padx=4, pady=4, sticky="w")
+
+        quick = ctk.CTkFrame(self, fg_color="transparent")
+        quick.pack(fill="x", padx=16, pady=(0, 8))
+        style_btn(quick, "全选", lambda: self._apply_preset("all"), width=55, height=26,
+                  font=FONTS["caption"](), fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["accent"]).pack(side="left")
+        style_btn(quick, "仅逗号句号", lambda: self._apply_preset("common"), width=85, height=26,
+                  font=FONTS["caption"](), fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["accent"]).pack(side="left", padx=(4, 0))
+        style_btn(quick, "全不选", lambda: self._apply_preset("none"), width=60, height=26,
+                  font=FONTS["caption"](), fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["accent"]).pack(side="left", padx=(4, 0))
+
+        ctk.CTkLabel(self, text="自定义分隔符（额外字符，如 | ~ ·）",
+                     font=FONTS["caption"](),
+                     text_color=COLORS["text_secondary"]).pack(anchor="w", padx=16, pady=(4, 2))
+        self._custom_entry = ctk.CTkEntry(
+            self, placeholder_text="输入额外的切分字符", font=FONTS["body"](),
+            fg_color=COLORS["surface"], border_color=COLORS["border"],
+            text_color=COLORS["text"])
+        self._custom_entry.pack(fill="x", padx=16, pady=(0, 8))
+        custom = "".join(c for c in (puncts or "") if c not in _PRESET_CHARS)
+        if custom:
+            self._custom_entry.insert(0, custom)
+        self._custom_entry.bind("<KeyRelease>", lambda e: self._update_preview())
+
+        self._preview_label = ctk.CTkLabel(
+            self, text="", font=FONTS["caption"](), text_color=COLORS["accent"],
+            wraplength=420, justify="left", height=42)
+        self._preview_label.pack(anchor="w", padx=16, pady=(0, 10), fill="x")
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+        style_btn(btn_row, "取消", self.destroy, width=70, height=28,
+                  font=FONTS["body"](), fg_color=COLORS["surface_hover"],
+                  hover_color=COLORS["accent"]).pack(side="right")
+        style_btn(btn_row, "确定", self._confirm, width=70, height=28,
+                  font=FONTS["body"]()).pack(side="right", padx=(0, 6))
+
+        self._update_preview()
+
+    def _bring_front(self):
+        try:
+            if self.winfo_exists():
+                self.lift()
+                self.focus_force()
+        except Exception:
+            pass
+
+    def _apply_preset(self, kind):
+        if kind == "all":
+            values = [True] * len(self._vars)
+        elif kind == "common":
+            values = [chars[0] in "，。" for _, chars in self._vars]
+        else:
+            values = [False] * len(self._vars)
+        for (var, _), v in zip(self._vars, values):
+            var.set(v)
+
+    def _collect(self):
+        chars = []
+        for var, group_chars in self._vars:
+            if var.get():
+                chars.extend(group_chars)
+        chars.extend(self._custom_entry.get())
+        seen = set()
+        out = []
+        for c in chars:
+            if c and c not in seen:
+                seen.add(c)
+                out.append(c)
+        return "".join(out)
+
+    def _update_preview(self):
+        s = self._collect()
+        if s:
+            self._preview_label.configure(text=f"当前生效分隔符（{len(s)} 个）：\n{s}")
+        else:
+            self._preview_label.configure(
+                text="当前未选择任何标点：\n将仅在超过 2 倍段字数时按阈值硬切")
+
+    def _confirm(self):
+        self._on_confirm(self._collect())
         self.destroy()
