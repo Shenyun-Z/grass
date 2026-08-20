@@ -6,6 +6,7 @@
 import os
 import random
 import re
+import threading
 from typing import Generator, List, Optional, Tuple
 
 import torch
@@ -17,25 +18,54 @@ from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_MAP
 DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
 # 连续标点视为一体（如 ... ？！ ……），切分时一并划入前段
 _ALL_PUNCTS = DEFAULT_SPLIT_PUNCTS + "…"
+# NLLB tokenizer 的最大输入长度
+_MAX_INPUT_LEN = 512
 
 _MODEL = None
 _TOKENIZER = None
 _MODEL_PATH = os.environ.get("NLLB_MODEL_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "nllb_model")
 # 计算设备：优先 GRASS_DEVICE 环境变量强制指定，否则自动检测 CUDA
 _DEVICE = os.environ.get("GRASS_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
+# 模型加载锁：防止并发进入 _get_model 造成半初始化
+_MODEL_LOCK = threading.Lock()
 
 
 def _get_model():
-    """加载并缓存模型（懒加载，自动使用 GPU 加速）"""
+    """加载并缓存模型（懒加载，自动使用 GPU 加速，加锁防并发半初始化）"""
     global _MODEL, _TOKENIZER
     if _MODEL is None:
-        if not os.path.exists(_MODEL_PATH):
-            raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
-        _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
-        _MODEL = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
-        _MODEL.to(_DEVICE)
-        _MODEL.eval()
+        with _MODEL_LOCK:
+            if _MODEL is None:  # 双重检查，避免重复加载
+                if not os.path.exists(_MODEL_PATH):
+                    raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
+                _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
+                _MODEL = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
+                if _DEVICE == "cuda":
+                    # 显式启用 CUDA 并转半精度，显著降低显存占用、提升推理速度
+                    _MODEL.half()
+                _MODEL.to(_DEVICE)
+                _MODEL.eval()
     return _TOKENIZER, _MODEL
+
+
+def get_device_info() -> str:
+    """返回当前计算设备信息，供界面显示"""
+    if _DEVICE == "cuda":
+        try:
+            name = torch.cuda.get_device_name(0)
+            return f"GPU（CUDA）· {name}"
+        except Exception:
+            return "GPU（CUDA）"
+    return "CPU"
+
+
+def _clear_cuda_cache():
+    """推理后释放 CUDA 缓存，避免多段连续推理时显存累积"""
+    if _DEVICE == "cuda":
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 def _clean(text: str) -> str:
@@ -81,18 +111,44 @@ def _resolve_pair(src_lang: str, tgt_lang: str) -> Tuple[str, str]:
     return src, tgt
 
 
+def _truncate_to_max_len(text: str, tokenizer, max_len: int = _MAX_INPUT_LEN) -> str:
+    """按 token 校验并截断超长文本，防止模型静默产生乱码/空输出"""
+    if not text:
+        return text
+    # 快速路径：短文本无需 tokenize 校验
+    if len(text) <= max_len:
+        return text
+    try:
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        if len(ids) <= max_len:
+            return text
+        # 按 token 长度截断（保留前 max_len 个 token）
+        truncated_ids = ids[:max_len]
+        return tokenizer.decode(truncated_ids, skip_special_tokens=True).strip()
+    except Exception:
+        # tokenize 失败时退化为字符级截断，保证不产生超长输入
+        return text[:max_len]
+
+
 def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
-                    batch_size: int = 8) -> List[str]:
-    """批量翻译文本列表（按 batch_size 分批输入模型，提升 GPU 利用率）
+                    batch_size: int = 1,
+                    stop_event: Optional[threading.Event] = None) -> List[str]:
+    """翻译文本列表（逐条翻译，不做多句批量输入）
 
     Args:
         texts: 待翻译文本列表
         src_lang: 源语言名
         tgt_lang: 目标语言名
-        batch_size: 每批最大条数
+        batch_size: 保留参数但固定为逐条翻译（忽略多句批量）
+        stop_event: 可选停止事件；每段之间检查，置位后立即中止
 
     Returns:
-        与 texts 顺序一致的翻译结果列表
+        与 texts 顺序一致的翻译结果列表（若中途停止，未完成项为空字符串）
+
+    Raises:
+        FileNotFoundError: 模型文件缺失
+        ValueError: 语言配置非法或目标语言代码不受支持
+        RuntimeError: 推理时发生 CUDA OOM 等硬件/运行错误
     """
     if not texts:
         return []
@@ -104,23 +160,31 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
         raise ValueError(f"不支持的目标语言代码: {tgt}")
 
     results: List[str] = [""] * len(texts)
-    with torch.no_grad():
-        for start in range(0, len(texts), batch_size):
-            batch = texts[start:start + batch_size]
-            inputs = tokenizer(
-                batch, return_tensors="pt", truncation=True, max_length=512,
-                padding=True)
-            inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
-            outputs = model.generate(
-                **inputs,
-                forced_bos_token_id=forced_bos_token_id,
-                max_length=512,
-                num_beams=1,
-                repetition_penalty=1.2,
-            )
-            decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-            for j, d in enumerate(decoded):
-                results[start + j] = _clean(d)
+    try:
+        with torch.no_grad():
+            for i, text in enumerate(texts):
+                if stop_event is not None and stop_event.is_set():
+                    break
+                # 逐条校验 token 长度，超限时显式截断，避免静默乱码
+                safe_text = _truncate_to_max_len(text, tokenizer)
+                inputs = tokenizer(
+                    safe_text, return_tensors="pt", truncation=True,
+                    max_length=_MAX_INPUT_LEN)
+                inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
+                outputs = model.generate(
+                    **inputs,
+                    forced_bos_token_id=forced_bos_token_id,
+                    max_length=_MAX_INPUT_LEN,
+                    num_beams=1,
+                    repetition_penalty=1.2,
+                )
+                decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+                results[i] = _clean(decoded[0])
+    except Exception:
+        # 异常向上抛给上层（gui 层捕获并分类提示），避免线程静默死亡
+        raise
+    finally:
+        _clear_cuda_cache()
     return results
 
 
@@ -204,7 +268,7 @@ def grass_translate(
     random_mode: str = "off", 
     excluded_langs: Optional[List[str]] = None,
     split_puncts: Optional[str] = None,
-    batch_size: int = 8
+    stop_event: Optional[threading.Event] = None
 ) -> Generator[Tuple, None, None]:
     """执行完整的生草翻译流程
     
@@ -217,6 +281,7 @@ def grass_translate(
         random_mode: 随机模式 ("off", "low", "high")
         excluded_langs: 排除的语言列表
         split_puncts: 切分标点集合（None 使用默认集合）
+        stop_event: 可选停止事件；在每段间检查，置位后立即中止生成
         
     Yields:
         翻译进度和结果元组
@@ -243,25 +308,28 @@ def grass_translate(
             lang_seq.append(choice)
             prev = choice
 
-    # 当前各段文本与语言状态
-    currents = list(segments)
-    cur_langs = ["中文"] * len(segments)
+    # 逐句翻译：外层遍历段落，内层遍历轮次。
+    # 每一段翻译完一轮立即 yield 进度，再翻译下一段，
+    # 保证一句翻译完成前绝不开始下一句，UI 能实时逐句变绿。
+    for si, seg in enumerate(segments):
+        if stop_event is not None and stop_event.is_set():
+            break
+        current = seg
+        current_lang = "中文"
+        for i, lang in enumerate(lang_seq):
+            if stop_event is not None and stop_event.is_set():
+                break
+            src = current_lang
+            batch_results = translate_batch([current], src, lang, stop_event=stop_event)
+            current = batch_results[0]
+            current_lang = lang
+            yield ("step", si, i, src, lang, current)
 
-    # 按轮次批量：同一轮所有段落具有相同的 (src, tgt) 语言对，可一次批处理
-    for i, lang in enumerate(lang_seq):
-        texts = list(currents)
-        src = cur_langs[0]
-        batch_results = translate_batch(texts, src, lang, batch_size)
-        for si, new_text in enumerate(batch_results):
-            currents[si] = new_text
-            cur_langs[si] = lang
-            yield ("step", si, i, src, lang, new_text)
-
-    texts = list(currents)
-    src = cur_langs[0]
-    batch_results = translate_batch(texts, src, final_lang, batch_size)
-    for si, final_text in enumerate(batch_results):
-        currents[si] = final_text
-        yield ("segment", si, src, final_lang, final_text)
+        if stop_event is not None and stop_event.is_set():
+            break
+        src = current_lang
+        batch_results = translate_batch([current], src, final_lang, stop_event=stop_event)
+        current = batch_results[0]
+        yield ("segment", si, src, final_lang, current)
 
     yield ("done", len(segments))

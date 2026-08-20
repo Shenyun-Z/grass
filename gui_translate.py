@@ -18,9 +18,20 @@ class TranslateMixin:
             self._start()
 
     def _start(self):
+        # 防重入：已在翻译中则不重复创建后台线程
+        if self._running:
+            return
         if not self._raw_text.strip():
             self._status_label.configure(text="⚠ 请输入文本", text_color=COLORS["warning"])
             return
+
+        # 取消上一次的轮询回调，防止旧线程残留消息串扰新任务
+        if self._poll_after_id is not None:
+            try:
+                self.after_cancel(self._poll_after_id)
+            except Exception:
+                pass
+            self._poll_after_id = None
 
         self._running = True
         self._start_time = time.time()
@@ -53,19 +64,20 @@ class TranslateMixin:
         t = threading.Thread(
             target=self._run_translate,
             args=(self._raw_text, rounds, pivot_langs, threshold, mode_arg, excluded,
-                  self._split_puncts, self._batch_size),
+                  self._split_puncts),
             daemon=True)
         t.start()
         self._poll_queue()
 
     def _run_translate(self, text, rounds, pivot_langs, threshold, random_mode="off",
-                       excluded_langs=None, split_puncts=None, batch_size=8):
+                       excluded_langs=None, split_puncts=None):
         q = self._msg_queue
         try:
             for msg in grass_translate(
                     text, rounds, pivot_langs, self._FINAL_LANG, threshold,
                     random_mode=random_mode, excluded_langs=excluded_langs or [],
-                    split_puncts=split_puncts, batch_size=batch_size):
+                    split_puncts=split_puncts,
+                    stop_event=self._STOP_EVENT):
                 if self._STOP_EVENT.is_set():
                     q.put(("aborted",))
                     return
