@@ -22,6 +22,12 @@ set NLLB_MODEL_PATH=D:\models\nllb_model   # Windows
 export NLLB_MODEL_PATH=/path/to/nllb_model  # Linux/macOS
 ```
 
+**设备加速**：程序会自动检测 CUDA，检测到 NVIDIA 显卡时模型与推理自动使用 GPU（翻译速度可提升 10 倍以上）。也可用 `GRASS_DEVICE` 环境变量强制指定设备：
+```bash
+set GRASS_DEVICE=cpu    # 强制使用 CPU
+set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
+```
+
 ## 用法
 
 ```bash
@@ -42,6 +48,8 @@ python main.py
 | 7 | 翻译完成后点击段落卡片查看完整翻译过程 | 弹出翻译过程详情窗口 |
 | 8 | 复制或保存结果；切换"对照"视图按段对比 | **结果**：结果/对照双视图；对照视图支持"原文 vs 当前结果"或"任意历史结果 vs 当前结果"按段对比 |
 | 9 | 点击"历史"回看最近 N 次处理结果 | **历史**：内存保留最近 20 次记录；查看原文/结果/参数详情；支持复制结果、删除单条、清空、一键对照查看 |
+
+> 提示：翻译完成后默认**不自动覆盖剪贴板**。若需完成后自动复制结果，勾选控制栏"完成后自动复制"开关。
 
 ## 翻译模式
 

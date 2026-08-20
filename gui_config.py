@@ -20,6 +20,14 @@ class ConfigMixin:
             pass
         return names
 
+    def _list_config_names(self):
+        """列出已保存的配置名（目录不存在时安全返回空列表）"""
+        try:
+            return [os.path.splitext(f)[0] for f in os.listdir(self.CONFIG_DIR)
+                    if f.endswith(".json")]
+        except OSError:
+            return []
+
     def _on_config_menu_change(self, val):
         if val == "配置":
             return
@@ -36,6 +44,7 @@ class ConfigMixin:
         if not name or not name.strip():
             return
         name = name.strip()
+        os.makedirs(self.CONFIG_DIR, exist_ok=True)
         langs = [v.get() for v in self._lang_vars]
         final = self._final_lang_var.get()
         data = {"langs": langs, "final": final, "rounds": self._rounds_var.get(),
@@ -49,7 +58,7 @@ class ConfigMixin:
 
     def _delete_config(self):
         from gui_dialogs import DeleteConfigDialog
-        configs = [os.path.splitext(f)[0] for f in os.listdir(self.CONFIG_DIR) if f.endswith(".json")]
+        configs = self._list_config_names()
         if not configs:
             self._show_toast("没有已保存的配置", "warning")
             return
@@ -96,7 +105,7 @@ class ConfigMixin:
         self._show_toast(f"已加载配置「{name}」")
 
     def _export_config(self):
-        configs = [os.path.splitext(f)[0] for f in os.listdir(self.CONFIG_DIR) if f.endswith(".json")]
+        configs = self._list_config_names()
         if not configs:
             self._show_toast("没有已保存的配置可导出", "warning")
             return
@@ -131,6 +140,7 @@ class ConfigMixin:
             self._show_toast(f"读取失败: {e}", "error")
             return
         name = os.path.splitext(os.path.basename(src))[0]
+        os.makedirs(self.CONFIG_DIR, exist_ok=True)
         dst_path = os.path.join(self.CONFIG_DIR, f"{name}.json")
         with open(dst_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
