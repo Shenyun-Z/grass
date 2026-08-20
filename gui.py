@@ -63,7 +63,6 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._seg_results = {}
         self._auto_follow_var = ctk.BooleanVar(value=True)
         self._auto_copy_var = ctk.BooleanVar(value=False)
-        self._batch_size = 8
         self._initial_layout_done = False
         self._split_view = None
 
@@ -100,6 +99,21 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._load_history()
         self._load_model_async()
         self.after(300, self._deferred_initial_layout)
+        # 窗口关闭时：设置停止事件中止后台翻译线程，并保存历史
+        self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
+    def _on_window_close(self):
+        try:
+            self._STOP_EVENT.set()
+            if self._poll_after_id is not None:
+                try:
+                    self.after_cancel(self._poll_after_id)
+                except Exception:
+                    pass
+                self._poll_after_id = None
+            self._save_history()
+        finally:
+            self.destroy()
 
     # ===== 初始化 =====
     def _deferred_initial_layout(self):
