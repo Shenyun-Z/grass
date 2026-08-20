@@ -62,6 +62,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._seg_steps = {}
         self._seg_results = {}
         self._auto_follow_var = ctk.BooleanVar(value=True)
+        self._auto_copy_var = ctk.BooleanVar(value=False)
         self._initial_layout_done = False
         self._split_view = None
 
@@ -428,18 +429,26 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         frame.grid(row=4, column=0, sticky="ew", padx=16, pady=8)
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_columnconfigure(1, weight=0)
+        frame.grid_columnconfigure(2, weight=0)
 
         self._status_label = ctk.CTkLabel(
             frame, text="⟳ 加载模型中...", font=FONTS["body"](),
             text_color=COLORS["info"])
         self._status_label.grid(row=0, column=0, sticky="w", padx=14, pady=12)
 
+        self._auto_copy_cb = ctk.CTkCheckBox(
+            frame, text="完成后自动复制", variable=self._auto_copy_var,
+            font=FONTS["caption"](), checkbox_width=16, checkbox_height=16,
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            border_color=COLORS["border"], text_color=COLORS["text_secondary"])
+        self._auto_copy_cb.grid(row=0, column=1, sticky="e", padx=(0, 10))
+
         self._start_btn = style_btn(
             frame, "▶ 开始翻译", self._toggle,
             width=150, height=44, font=ctk.CTkFont(size=16, weight="bold"),
             corner_radius=8)
-        self._start_btn.grid(row=0, column=1, padx=14, pady=12)
-        self._start_btn.configure(state="disabled")
+        self._start_btn.grid(row=0, column=2, padx=14, pady=12)
+        self._start_btn.configure(text="⟳ 模型加载中...", state="disabled")
 
     # ===== 进度区 =====
     def _build_progress(self):
@@ -741,6 +750,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._load_file_btn.configure(state=state)
         self._clipboard_btn.configure(state=state)
         self._punct_btn.configure(state=state)
+        self._auto_copy_cb.configure(state=state)
         self._result_view_seg.configure(state=state)
         self._compare_menu.configure(state=state)
         self._random_mode_seg.configure(state=state)
@@ -939,10 +949,11 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
                 self.after(200, check)
             elif self._model_exc:
                 self._status_label.configure(text=f"✗ 模型加载失败: {self._model_exc}", text_color=COLORS["error"])
+                self._start_btn.configure(text="✗ 模型加载失败")
                 self.title("生草机 — 模型加载失败")
             else:
                 self._model_ready = True
-                self._start_btn.configure(state="normal")
+                self._start_btn.configure(text="▶ 开始翻译", state="normal")
                 self._status_label.configure(text="✓ 就绪", text_color=COLORS["success"])
                 self.title("生草机")
                 self._on_input_change()

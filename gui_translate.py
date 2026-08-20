@@ -10,6 +10,7 @@ from gui_styles import COLORS
 class TranslateMixin:
     def _toggle(self):
         if not self._model_ready:
+            self._show_toast("模型加载中，请稍候...", "info")
             return
         if self._running:
             self._stop()
@@ -105,7 +106,8 @@ class TranslateMixin:
                 self._seg_steps[si] = []
             self._seg_steps[si].append((src_lang, tgt_lang, current))
             seg_total = len(self._segments)
-            progress = (si + (step_i + 1) / total) / seg_total
+            # 每段共 rounds+1 步（中转轮数 + 最后译回），译回步骤也计入进度，避免跳变
+            progress = (si + (step_i + 1) / (total + 1)) / seg_total
             self._animate_progress(progress)
             self._update_seg_status(si, "●")
             self._auto_follow_seg(si)
@@ -140,10 +142,12 @@ class TranslateMixin:
             self._animate_progress(1)
             self.title("生草机 — 翻译完成")
             result_text = self._result_box.get("1.0", "end-1c")
-            if result_text:
+            if result_text and self._auto_copy_var.get():
                 self.clipboard_clear()
                 self.clipboard_append(result_text)
                 self._show_toast(f"翻译完成 ({time_str})，结果已复制到剪贴板")
+            else:
+                self._show_toast(f"翻译完成 ({time_str})")
             self._add_history_entry(stopped=False, elapsed_str=time_str)
         elif kind == "aborted":
             self._running = False

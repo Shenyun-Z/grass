@@ -15,20 +15,26 @@ from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_MAP
 
 # 默认切分标点集合：中文/英文的常见句读标点
 DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
+# 连续标点视为一体（如 ... ？！ ……），切分时一并划入前段
+_ALL_PUNCTS = DEFAULT_SPLIT_PUNCTS + "…"
 
 _MODEL = None
 _TOKENIZER = None
 _MODEL_PATH = os.environ.get("NLLB_MODEL_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "nllb_model")
+# 计算设备：优先 GRASS_DEVICE 环境变量强制指定，否则自动检测 CUDA
+_DEVICE = os.environ.get("GRASS_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def _get_model():
-    """加载并缓存模型（懒加载）"""
+    """加载并缓存模型（懒加载，自动使用 GPU 加速）"""
     global _MODEL, _TOKENIZER
     if _MODEL is None:
         if not os.path.exists(_MODEL_PATH):
             raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
         _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
         _MODEL = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
+        _MODEL.to(_DEVICE)
+        _MODEL.eval()
     return _TOKENIZER, _MODEL
 
 
@@ -42,6 +48,7 @@ def _nllb_translate(text: str, src_lang: str, tgt_lang: str) -> str:
     tokenizer, model = _get_model()
     tokenizer.src_lang = src_lang
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
     forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
     if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
         raise ValueError(f"不支持的目标语言代码: {tgt_lang}")
@@ -91,14 +98,23 @@ def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = 
     segments = []
     start = 0
     cnt = 0
-    for i, ch in enumerate(text):
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
         cnt += 1
-        if ch in punct_set:
-            if cnt >= threshold:
-                segments.append(text[start:i + 1])
-                start = i + 1
-                cnt = 0
-    if start < len(text):
+        if ch in punct_set and cnt >= threshold:
+            # 吞并切分点后的连续标点（含省略号 …），避免拆散 ... ？！ …… 等组合
+            j = i + 1
+            while j < n and text[j] in _ALL_PUNCTS:
+                j += 1
+            segments.append(text[start:j])
+            start = j
+            cnt = 0
+            i = j
+        else:
+            i += 1
+    if start < n:
         tail = text[start:]
         if not segments and len(tail) > threshold * 2:
             for j in range(0, len(tail), threshold):
