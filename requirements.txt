@@ -1,5 +1,8 @@
 torch
 transformers
+sentencepiece
 customtkinter
+tkinterdnd2
 openpyxl
+setuptools
 pytest

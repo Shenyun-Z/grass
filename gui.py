@@ -63,6 +63,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._seg_results = {}
         self._auto_follow_var = ctk.BooleanVar(value=True)
         self._auto_copy_var = ctk.BooleanVar(value=False)
+        self._batch_size = 8
         self._initial_layout_done = False
         self._split_view = None
 
@@ -71,6 +72,9 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._history = []
         self._history_limit = 20
         self._history_next_id = 1
+        # 历史记录持久化文件（程序退出后仍保留）
+        self._history_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "history.json")
 
         # 结果视图（结果 / 对照）与对照源（原文 / 历史记录）
         self._result_view = "结果"
@@ -93,6 +97,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self.bind("<Control-Shift-KeyPress-V>", lambda e: self._paste_from_clipboard())
         self.bind("<Control-h>", lambda e: self._open_history_dialog())
         self.bind("<Control-H>", lambda e: self._open_history_dialog())
+        self._load_history()
         self._load_model_async()
         self.after(300, self._deferred_initial_layout)
 
@@ -803,6 +808,33 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._compare_view.set_data(left_title, left_items, "当前结果", right_items)
 
     # ===== 历史记录 =====
+    def _load_history(self):
+        """启动时从本地文件加载历史记录"""
+        try:
+            if not os.path.exists(self._history_path):
+                return
+            import json
+            with open(self._history_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return
+            self._history = [r for r in data if isinstance(r, dict) and "id" in r]
+            self._history = self._history[-self._history_limit:]
+            if self._history:
+                self._history_next_id = max(r["id"] for r in self._history) + 1
+        except Exception:
+            self._history = []
+        self._update_compare_menu()
+
+    def _save_history(self):
+        """将历史记录持久化到本地文件"""
+        try:
+            import json
+            with open(self._history_path, "w", encoding="utf-8") as f:
+                json.dump(self._history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     def _history_label(self, rec):
         mark = " ⏹" if rec.get("stopped") else ""
         return f"#{rec['id']} {rec['time']}{mark}"
@@ -836,6 +868,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._history.append(rec)
         while len(self._history) > self._history_limit:
             self._history.pop(0)
+        self._save_history()
         self._update_compare_menu()
         if self._result_view == "对照":
             self._render_compare_view()
@@ -873,12 +906,14 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
     def _history_delete(self, rec_id):
         # 原地修改，保持 HistoryDialog 持有的引用有效
         self._history[:] = [r for r in self._history if r["id"] != rec_id]
+        self._save_history()
         self._update_compare_menu()
         if self._result_view == "对照":
             self._render_compare_view()
 
     def _history_clear(self):
         self._history.clear()
+        self._save_history()
         self._update_compare_menu()
         if self._result_view == "对照":
             self._render_compare_view()
@@ -948,7 +983,9 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
             if t.is_alive():
                 self.after(200, check)
             elif self._model_exc:
-                self._status_label.configure(text=f"✗ 模型加载失败: {self._model_exc}", text_color=COLORS["error"])
+                from engine import classify_translate_error
+                friendly = classify_translate_error(self._model_exc)
+                self._status_label.configure(text=f"✗ {friendly}", text_color=COLORS["error"])
                 self._start_btn.configure(text="✗ 模型加载失败")
                 self.title("生草机 — 模型加载失败")
             else:
@@ -957,6 +994,8 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
                 self._status_label.configure(text="✓ 就绪", text_color=COLORS["success"])
                 self.title("生草机")
                 self._on_input_change()
+                if self._history:
+                    self._show_toast(f"已加载 {len(self._history)} 条历史记录", "info")
         self.after(200, check)
 
     # ===== 拖放 =====

@@ -3,7 +3,7 @@
 import queue
 import threading
 import time
-from engine import grass_translate
+from engine import grass_translate, classify_translate_error
 from gui_styles import COLORS
 
 
@@ -52,25 +52,26 @@ class TranslateMixin:
 
         t = threading.Thread(
             target=self._run_translate,
-            args=(self._raw_text, rounds, pivot_langs, threshold, mode_arg, excluded, self._split_puncts),
+            args=(self._raw_text, rounds, pivot_langs, threshold, mode_arg, excluded,
+                  self._split_puncts, self._batch_size),
             daemon=True)
         t.start()
         self._poll_queue()
 
     def _run_translate(self, text, rounds, pivot_langs, threshold, random_mode="off",
-                       excluded_langs=None, split_puncts=None):
+                       excluded_langs=None, split_puncts=None, batch_size=8):
         q = self._msg_queue
         try:
             for msg in grass_translate(
                     text, rounds, pivot_langs, self._FINAL_LANG, threshold,
                     random_mode=random_mode, excluded_langs=excluded_langs or [],
-                    split_puncts=split_puncts):
+                    split_puncts=split_puncts, batch_size=batch_size):
                 if self._STOP_EVENT.is_set():
                     q.put(("aborted",))
                     return
                 q.put(msg)
         except Exception as e:
-            q.put(("error", str(e)))
+            q.put(("error", classify_translate_error(e)))
 
     def _stop(self):
         self._STOP_EVENT.set()
