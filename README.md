@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v1.4.1**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.4**（`python main.py --version` 可查看）。
 
 ## 原理
 
