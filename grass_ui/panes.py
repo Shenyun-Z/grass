@@ -347,13 +347,13 @@ class LangsPane(Card):
         self._rebuild()
 
     def langs(self) -> list[str]:
-        return [b.text() for b in self._buttons]
+        return list(self._langs)
 
     def set_lang_text(self, index: int, lang: str) -> None:
         if 0 <= index < len(self._buttons):
             self._buttons[index].setText(lang)
-            if index < len(self._langs):
-                self._langs[index] = lang
+        if 0 <= index < len(self._langs):
+            self._langs[index] = lang
         self._refresh_height(force=True)
 
     def set_chain(self, text: str) -> None:
@@ -408,6 +408,10 @@ class LangsPane(Card):
             row.addWidget(arrow)
             self._buttons.append(btn)
             self._host.flow.addWidget(row_widget)
+        # 重建后立刻让布局按新条目重排：新建控件在 show 之前会被跳过，
+        # 只靠高度刷新会把条目留在上一次的坐标上（表现为语言方块"少一个"）
+        self._host.flow.invalidate()
+        self._host.updateGeometry()
         self._refresh_height(force=True)
 
     def _refresh_height(self, force: bool = False) -> None:

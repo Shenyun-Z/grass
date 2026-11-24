@@ -269,6 +269,21 @@ class MainWindow(QMainWindow):
         self._update_chain_label()
         self._on_input_change()
 
+    def _apply_langs(self, langs: list[str]) -> None:
+        """按给定语言列表设置中转语言，并把轮数与语言数对齐。
+
+        语言预设、配置导入都可能带来和轮数不一致的条数，统一在这里收口，
+        避免"轮数 2 但链条有 3 种语言"这类显示错位。
+        """
+        langs = [lang for lang in langs if lang][:30]
+        if not langs:
+            return
+        self._params_pane.set_rounds(len(langs))
+        self._langs = list(langs)
+        self._langs_pane.set_langs(self._langs)
+        self._update_chain_label()
+        self._on_input_change()
+
     def _on_random_mode_change(self, mode: str) -> None:
         fixed = (mode == "固定")
         self._langs_pane.set_state(not self._running, fixed_mode=fixed)
@@ -285,6 +300,9 @@ class MainWindow(QMainWindow):
         final = self._params_pane.final_lang()
         self._final_lang = final
         self._langs = self._langs_pane.langs()
+        if self._langs and len(self._langs) != self._params_pane.rounds():
+            # 兜底：链条长度必须和轮数一致，任何来路不明的改动都在这里纠正
+            self._params_pane.set_rounds(len(self._langs))
         self._langs_pane.set_chain("中文 → " + " → ".join(self._langs) + " → " + final)
 
     def _update_random_chain_label(self) -> None:
@@ -320,9 +338,7 @@ class MainWindow(QMainWindow):
     def _open_preset(self) -> None:
         dialog = PresetDialog(self, len(self._langs_pane.langs()))
         if dialog.exec() and dialog.result_langs:
-            self._langs_pane.set_langs(dialog.result_langs)
-            self._update_chain_label()
-            self._on_input_change()
+            self._apply_langs(dialog.result_langs)
 
     def _open_exclude_dialog(self) -> None:
         dialog = ExcludeLangDialog(self, self._excluded_langs)
@@ -396,11 +412,7 @@ class MainWindow(QMainWindow):
         if normalized is None:
             return False
         langs, final, rounds, split = normalized
-        self._params_pane.set_rounds(rounds)
-        self._on_rounds_change(rounds)
-        for i, lang in enumerate(langs):
-            if i < len(self._langs_pane.langs()):
-                self._langs_pane.set_lang_text(i, lang)
+        self._apply_langs(langs)
         self._params_pane.set_final_lang(final)
         self._final_lang = final
         if split is not None:

@@ -120,9 +120,6 @@ class FlowLayout(QLayout):
         y = effective.y()
         line_height = 0
         for item in self._items:
-            widget = item.widget()
-            if widget is not None and not widget.isVisible():
-                continue
             hint = item.sizeHint()
             next_x = x + hint.width() + self._hspacing
             if next_x - self._hspacing > effective.right() and line_height > 0:

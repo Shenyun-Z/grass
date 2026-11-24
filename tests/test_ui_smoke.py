@@ -119,3 +119,50 @@ def test_zoom_rebuilds_layout(qapp, monkeypatch, tmp_path):
         assert abs(theme.SCALE - 1.0) < 0.01
     finally:
         window.close()
+
+
+def test_langs_and_rounds_stay_in_sync(qapp, monkeypatch, tmp_path):
+    """语言列表与轮数必须始终一致，避免链条显示的语言数和列表条数对不上"""
+    monkeypatch.setenv("GRASS_SKIP_MODEL_LOAD", "1")
+    monkeypatch.setenv("GRASS_DATA_DIR", str(tmp_path))
+    from grass_ui.mainwindow import MainWindow
+
+    window = MainWindow()
+    try:
+        window._params_pane.set_rounds(2)
+        window._on_rounds_change(2)
+        assert window._langs_pane.langs() == ["英语", "法语"]
+        assert window._params_pane.rounds() == 2
+
+        # 预设/配置带来的语言条数不同时，轮数要跟着语言数走
+        window._apply_langs(["英语", "法语", "俄语"])
+        assert window._params_pane.rounds() == 3
+        assert window._langs_pane.langs() == ["英语", "法语", "俄语"]
+        assert window._langs_pane._chain.text() == "中文 → 英语 → 法语 → 俄语 → 中文"
+
+        # 反向兜底：语言列表被直接改动后，刷新链条也会把轮数纠正过来
+        window._params_pane.set_rounds(2)
+        window._langs_pane.set_langs(["日语", "德语", "俄语"])
+        window._update_chain_label()
+        assert window._params_pane.rounds() == 3
+        assert window._langs_pane._chain.text() == "中文 → 日语 → 德语 → 俄语 → 中文"
+    finally:
+        window.close()
+
+
+def test_lang_chips_not_clipped(qapp):
+    """多语言方块换行后，滚动区高度要覆盖所有行，不能把后面的语言裁掉"""
+    from grass_ui.panes import LangsPane
+
+    pane = LangsPane()
+    pane.resize(360, 220)
+    pane.show()
+    pane.set_langs(["英语", "法语", "俄语", "日语", "德语"])
+    for _ in range(5):
+        qapp.processEvents()
+    host = pane._host
+    assert len(pane._buttons) == 5
+    bottoms = [b.mapTo(host, b.rect().bottomLeft()).y() for b in pane._buttons]
+    # 方块必须全部落在宿主控件高度内（换行后的每一行都可见）
+    assert max(bottoms) < host.height()
+    pane.close()
