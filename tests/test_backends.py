@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """后端与模型识别测试：不加载模型、不需要 torch"""
 import json
+import os
 
 import pytest
 
@@ -84,3 +85,20 @@ def test_m2m100_clean_output_strips_prefix_and_quotes():
 def test_m2m100_input_limit_is_smaller_than_hymt2():
     import hymt2
     assert m2m100.MAX_INPUT_TOKENS < hymt2.MAX_INPUT_TOKENS
+
+
+# ===== 非 ASCII 路径下的分词器镜像 =====
+def test_ascii_tokenizer_dir_passthrough(tmp_path):
+    assert m2m100.ascii_tokenizer_dir(str(tmp_path)) == str(tmp_path)
+
+
+def test_ascii_tokenizer_dir_mirrors_chinese_path(tmp_path):
+    model_dir = tmp_path / "模型目录"
+    model_dir.mkdir()
+    for name in m2m100.TOKENIZER_FILES:
+        (model_dir / name).write_text("x", encoding="utf-8")
+    mirror = m2m100.ascii_tokenizer_dir(str(model_dir))
+    assert mirror != str(model_dir)
+    assert mirror.isascii()
+    for name in m2m100.TOKENIZER_FILES:
+        assert os.path.exists(os.path.join(mirror, name))
