@@ -5,7 +5,7 @@ import threading
 import customtkinter as ctk
 
 from gui_styles import COLORS, FONTS, style_card, style_btn
-from languages import LANG_GROUPS, LANG_MAP, PRESETS
+from languages import LANG_GROUPS, PRESETS
 
 # 切分标点预设组：(组名, 包含的字符)
 PUNCT_GROUPS = [
@@ -362,8 +362,11 @@ class StepDetailDialog(ctk.CTkToplevel):
                 result = translate_once(text, src_lang, "中文")
                 self.after(0, lambda: label.configure(text=f"↩ {result}", text_color=COLORS["info"]))
                 self.after(0, lambda: btn.configure(text="已回译"))
-            except Exception as e:
-                self.after(0, lambda: label.configure(text=f"回译失败: {e}", text_color=COLORS["error"]))
+            except Exception as exc:
+                # 不能用 except 变量 e 直接闭包：Py3 会在 except 结束后删除该名字
+                msg = str(exc)
+                self.after(0, lambda m=msg: label.configure(
+                    text=f"回译失败: {m}", text_color=COLORS["error"]))
                 self.after(0, lambda: btn.configure(text="回译中文", state="normal"))
 
         threading.Thread(target=_do, daemon=True).start()

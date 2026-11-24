@@ -18,6 +18,9 @@ from gui_config import ConfigMixin
 from gui_translate import TranslateMixin
 from gui_dialogs import StepDetailDialog, HistoryDialog, SplitPunctDialog
 from engine import _preprocess, _split_by_threshold, _get_model, DEFAULT_SPLIT_PUNCTS
+from validators import (atomic_write_text, dump_history, escape_spreadsheet_cell,
+                        next_history_id, normalize_history, read_text_file)
+from version import __version__
 
 
 class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ctk.CTk):
@@ -25,7 +28,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
 
     def __init__(self):
         super().__init__()
-        self.title("生草机")
+        self._set_title()
         self.geometry("960x820")
         self.minsize(550, 350)
         self.configure(fg_color=COLORS["bg"])
@@ -101,6 +104,11 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self.after(300, self._deferred_initial_layout)
         # 窗口关闭时：设置停止事件中止后台翻译线程，并保存历史
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
+    def _set_title(self, suffix=""):
+        """统一标题：固定带版本号，suffix 为运行状态说明"""
+        base = f"生草机 v{__version__}"
+        self.title(f"{base} — {suffix}" if suffix else base)
 
     def _on_window_close(self):
         try:
@@ -363,12 +371,14 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
             width=100, font=FONTS["body"](), height=28)
         self._preset_btn.pack(side="right", padx=(4, 0))
 
-        style_btn(right_btns, "导入", self._import_config,
-                  width=50, height=28, font=FONTS["caption"](),
-                  fg_color=COLORS["surface_hover"], hover_color=COLORS["accent"]).pack(side="right", padx=(0, 2))
-        style_btn(right_btns, "导出", self._export_config,
-                  width=50, height=28, font=FONTS["caption"](),
-                  fg_color=COLORS["surface_hover"], hover_color=COLORS["accent"]).pack(side="right", padx=(0, 2))
+        self._import_btn = style_btn(right_btns, "导入", self._import_config,
+                                    width=50, height=28, font=FONTS["caption"](),
+                                    fg_color=COLORS["surface_hover"], hover_color=COLORS["accent"])
+        self._import_btn.pack(side="right", padx=(0, 2))
+        self._export_btn = style_btn(right_btns, "导出", self._export_config,
+                                    width=50, height=28, font=FONTS["caption"](),
+                                    fg_color=COLORS["surface_hover"], hover_color=COLORS["accent"])
+        self._export_btn.pack(side="right", padx=(0, 2))
 
         self._config_menu = ctk.CTkOptionMenu(
             right_btns, values=self._get_config_names(),
@@ -718,9 +728,12 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
 
     def _set_input_text_from_file(self, path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-        except Exception:
+            text = read_text_file(path)
+        except Exception as e:
+            self._show_toast(f"读取失败: {e}", "error")
+            return
+        if not text.strip():
+            self._show_toast("文件内容为空", "warning")
             return
         self._raw_text = text
         self._view_toggle.set("原文")
@@ -729,7 +742,7 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._input_box.delete("1.0", "end")
         self._input_box.insert("1.0", text)
         self._on_input_change()
-        self._show_toast(f"已读取 {os.path.basename(path)}")
+        self._show_toast(f"已读取 {os.path.basename(path)}（{len(text)} 字符）")
 
     def _on_input_change(self):
         if self._running:
@@ -774,6 +787,10 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
         self._compare_menu.configure(state=state)
         self._random_mode_seg.configure(state=state)
         self._exclude_btn.configure(state="disabled" if (not enabled or is_fixed) else "normal")
+        # 翻译进行中禁止切换配置，避免语言链在运行中被改写
+        self._config_menu.configure(state=state)
+        self._import_btn.configure(state=state)
+        self._export_btn.configure(state=state)
         for btn in self._lang_btns:
             btn.configure(state=state if is_fixed else "disabled")
 
@@ -823,29 +840,25 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
 
     # ===== 历史记录 =====
     def _load_history(self):
-        """启动时从本地文件加载历史记录"""
+        """启动时从本地文件加载历史记录（结构损坏的条目会被跳过，避免弹窗崩溃）"""
+        self._history = []
         try:
             if not os.path.exists(self._history_path):
                 return
             import json
             with open(self._history_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if not isinstance(data, list):
-                return
-            self._history = [r for r in data if isinstance(r, dict) and "id" in r]
-            self._history = self._history[-self._history_limit:]
-            if self._history:
-                self._history_next_id = max(r["id"] for r in self._history) + 1
+            self._history = normalize_history(data, self._history_limit)
         except Exception:
             self._history = []
-        self._update_compare_menu()
+        finally:
+            self._history_next_id = next_history_id(self._history)
+            self._update_compare_menu()
 
     def _save_history(self):
-        """将历史记录持久化到本地文件"""
+        """将历史记录持久化到本地文件（原子写入，避免中断留下半个文件）"""
         try:
-            import json
-            with open(self._history_path, "w", encoding="utf-8") as f:
-                json.dump(self._history, f, ensure_ascii=False, indent=2)
+            atomic_write_text(self._history_path, dump_history(self._history))
         except Exception:
             pass
 
@@ -950,38 +963,42 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
             filetypes=[("文本文件", "*.txt"), ("Excel 文件", "*.xlsx")], initialfile="output.txt")
         if not path:
             return
-        if path.endswith(".xlsx"):
-            try:
-                import openpyxl
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = "生草结果"
-                ws.append(["段号", "原文", "结果"])
-                for i, seg in enumerate(self._segments):
-                    result = self._seg_results.get(i, "")
-                    ws.append([i + 1, seg, result])
-                detail_ws = wb.create_sheet("翻译过程")
-                detail_ws.append(["段号", "步骤", "源语言", "目标语言", "翻译结果"])
-                for si in sorted(self._seg_steps.keys()):
-                    for step_i, (src, tgt, txt) in enumerate(self._seg_steps[si]):
-                        detail_ws.append([si + 1, step_i + 1, src, tgt, txt])
-                for col in ws.columns:
-                    ws.column_dimensions[col[0].column_letter].width = 40
-                for col in detail_ws.columns:
-                    detail_ws.column_dimensions[col[0].column_letter].width = 40
-                wb.save(path)
-                self._show_toast(f"已保存到 {os.path.basename(path)}")
-            except ImportError:
-                self._show_toast("需要 openpyxl: pip install openpyxl")
-        else:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(text)
+        try:
+            if path.endswith(".xlsx"):
+                self._save_result_xlsx(path)
+            else:
+                atomic_write_text(path, text)
             self._show_toast(f"已保存到 {os.path.basename(path)}")
+        except ImportError:
+            self._show_toast("需要 openpyxl: pip install openpyxl", "error")
+        except Exception as e:
+            self._show_toast(f"保存失败: {e}", "error")
+
+    def _save_result_xlsx(self, path):
+        """导出 Excel：两页（结果概览 / 翻译过程），文本做公式注入转义"""
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "生草结果"
+        ws.append(["段号", "原文", "结果"])
+        for i, seg in enumerate(self._segments):
+            ws.append([i + 1, escape_spreadsheet_cell(seg),
+                       escape_spreadsheet_cell(self._seg_results.get(i, ""))])
+        detail_ws = wb.create_sheet("翻译过程")
+        detail_ws.append(["段号", "步骤", "源语言", "目标语言", "翻译结果"])
+        for si in sorted(self._seg_steps.keys()):
+            for step_i, (src, tgt, txt) in enumerate(self._seg_steps[si]):
+                detail_ws.append([si + 1, step_i + 1, src, tgt,
+                                  escape_spreadsheet_cell(txt)])
+        for sheet in (ws, detail_ws):
+            for col in sheet.columns:
+                sheet.column_dimensions[col[0].column_letter].width = 40
+        wb.save(path)
 
     # ===== 模型加载 =====
     def _load_model_async(self):
         self._status_label.configure(text="⟳ 加载模型中...", text_color=COLORS["info"])
-        self.title("生草机 — 加载模型中...")
+        self._set_title("加载模型中...")
         self._model_exc = None
 
         def load():
@@ -1001,12 +1018,12 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
                 friendly = classify_translate_error(self._model_exc)
                 self._status_label.configure(text=f"✗ {friendly}", text_color=COLORS["error"])
                 self._start_btn.configure(text="✗ 模型加载失败")
-                self.title("生草机 — 模型加载失败")
+                self._set_title("模型加载失败")
             else:
                 self._model_ready = True
                 self._start_btn.configure(text="▶ 开始翻译", state="normal")
                 self._status_label.configure(text="✓ 就绪", text_color=COLORS["success"])
-                self.title("生草机")
+                self._set_title()
                 self._on_input_change()
                 if self._history:
                     self._show_toast(f"已加载 {len(self._history)} 条历史记录", "info")
@@ -1014,6 +1031,13 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
 
     # ===== 拖放 =====
     def _on_drop(self, event):
-        path = event.data.strip('{}')
-        if path.lower().endswith('.txt'):
-            self._set_input_text_from_file(path)
+        """接收拖放文件：正确解析带空格/花括号的路径，仅接受 .txt"""
+        try:
+            paths = self.tk.splitlist(event.data)
+        except Exception:
+            paths = [event.data]
+        candidates = [p for p in paths if isinstance(p, str) and p.lower().endswith(".txt")]
+        if not candidates:
+            self._show_toast("只支持拖放 .txt 文本文件", "warning")
+            return
+        self._set_input_text_from_file(candidates[0])
