@@ -1,56 +1,37 @@
 # -*- coding: utf-8 -*-
 """翻译引擎模块
 
-提供基于 NLLB-200 模型的多语言翻译功能。
+提供基于腾讯混元 Hy-MT2（本地部署）的多语言中转翻译能力。
+模型加载、提示词与推理细节见 hymt2.py；本模块负责分段、语言链与流程编排。
 """
+from __future__ import annotations
+
 import os
 import random
 import threading
 from typing import Generator, List, Optional, Tuple
 
-from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_MAP
+import hymt2
+from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_NAMES
 
 # 默认切分标点集合：中文/英文的常见句读标点
 DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
 # 连续标点视为一体（如 ... ？！ ……），切分时一并划入前段
 _ALL_PUNCTS = DEFAULT_SPLIT_PUNCTS + "…"
-# NLLB tokenizer 的最大输入长度
-_MAX_INPUT_LEN = 512
+# 模型的最大输入长度（按 token 计）
+_MAX_INPUT_LEN = hymt2.MAX_INPUT_TOKENS
 
-_MODEL = None
-_TOKENIZER = None
-_MODEL_PATH = os.environ.get("NLLB_MODEL_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "nllb_model")
+# 兼容旧调用点：权重检查/截断统一由 hymt2 提供
+_has_safetensors = hymt2.has_safetensors
+_truncate_to_max_len = hymt2.truncate_to_max_len
+
 # 计算设备：惰性解析（首次用到才检测），避免模块导入期依赖 CUDA / torch
 _DEVICE: Optional[str] = None
-# 模型加载锁：防止并发进入 _get_model 造成半初始化
-_MODEL_LOCK = threading.Lock()
-
-_TORCH = None
-_TRANSFORMERS = None
 
 
 def _torch():
-    """惰性导入 torch：缺依赖时抛出可读的 ImportError，而不是让程序在导入期崩溃"""
-    global _TORCH
-    if _TORCH is None:
-        try:
-            import torch
-        except ImportError as exc:
-            raise ImportError("缺少依赖 torch：请先执行 pip install -r requirements.txt") from exc
-        _TORCH = torch
-    return _TORCH
-
-
-def _transformers():
-    """惰性导入 transformers，返回 (AutoTokenizer, AutoModelForSeq2SeqLM)"""
-    global _TRANSFORMERS
-    if _TRANSFORMERS is None:
-        try:
-            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        except ImportError as exc:
-            raise ImportError("缺少依赖 transformers：请先执行 pip install -r requirements.txt") from exc
-        _TRANSFORMERS = (AutoTokenizer, AutoModelForSeq2SeqLM)
-    return _TRANSFORMERS
+    """惰性导入 torch（委托给 hymt2，保持旧调用点可用）"""
+    return hymt2.torch()
 
 
 def _device() -> str:
@@ -71,38 +52,9 @@ def _device() -> str:
     return _DEVICE
 
 
-def _has_safetensors(model_dir: str) -> bool:
-    """模型目录内是否存在 safetensors 权重（优先使用，避免 pickle 反序列化风险）"""
-    try:
-        return any(name.endswith(".safetensors") for name in os.listdir(model_dir))
-    except OSError:
-        return False
-
-
 def _get_model():
-    """加载并缓存模型（懒加载，自动使用 GPU 加速，加锁防并发半初始化）"""
-    global _MODEL, _TOKENIZER
-    if _MODEL is None:
-        with _MODEL_LOCK:
-            if _MODEL is None:  # 双重检查，避免重复加载
-                if not os.path.exists(_MODEL_PATH):
-                    raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
-                AutoTokenizer, AutoModelForSeq2SeqLM = _transformers()
-                device = _device()
-                load_kwargs = {"local_files_only": True}
-                # 仅在本地目录确实带 safetensors 时强制使用，其余情况交给默认策略
-                if _has_safetensors(_MODEL_PATH):
-                    load_kwargs["use_safetensors"] = True
-                tokenizer = AutoTokenizer.from_pretrained(_MODEL_PATH, **load_kwargs)
-                model = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, **load_kwargs)
-                if device == "cuda":
-                    # 显式启用 CUDA 并转半精度，显著降低显存占用、提升推理速度
-                    model.half()
-                model.to(device)
-                model.eval()
-                # 全部初始化成功后才对外发布，避免异常时留下半初始化的全局状态
-                _TOKENIZER, _MODEL = tokenizer, model
-    return _TOKENIZER, _MODEL
+    """加载并缓存模型（供界面预热调用，真正的推理在 hymt2 内完成）"""
+    return hymt2.get_model(_device())
 
 
 def get_device_info() -> str:
@@ -120,13 +72,15 @@ def get_device_info() -> str:
     return "CPU"
 
 
+def get_model_info() -> str:
+    """返回模型信息，供界面显示"""
+    return f"Hy-MT2 · {os.path.basename(os.path.normpath(hymt2.model_path()))}"
+
+
 def _clear_cuda_cache():
     """推理后释放 CUDA 缓存，避免多段连续推理时显存累积"""
     if _DEVICE == "cuda":
-        try:
-            _torch().cuda.empty_cache()
-        except Exception:
-            pass
+        hymt2.clear_cuda_cache(_DEVICE)
 
 
 def _clean(text: str) -> str:
@@ -134,62 +88,22 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
-def _nllb_translate(text: str, src_lang: str, tgt_lang: str) -> str:
-    """执行单次 NLLB 翻译"""
-    tokenizer, model = _get_model()
-    device = _device()
-    tokenizer.src_lang = src_lang
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=_MAX_INPUT_LEN)
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
-    if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
-        raise ValueError(f"不支持的目标语言代码: {tgt_lang}")
-    with _torch().no_grad():
-        outputs = model.generate(
-            **inputs,
-            forced_bos_token_id=forced_bos_token_id,
-            max_length=_MAX_INPUT_LEN,
-            num_beams=1,
-            repetition_penalty=1.2,
-        )
-    return tokenizer.batch_decode(outputs, skip_special_tokens=True)[0].strip()
-
-
-def translate_once(text: str, src_lang: str, tgt_lang: str) -> str:
-    """翻译一次文本（包含语言解析和清理）"""
-    src = resolve(src_lang)
-    tgt = resolve(tgt_lang)
-    if src is None or tgt is None:
-        raise ValueError(f"不支持的语言: {src_lang} -> {tgt_lang}")
-    return _clean(_nllb_translate(text, src, tgt))
-
-
 def _resolve_pair(src_lang: str, tgt_lang: str) -> Tuple[str, str]:
-    """解析语言代码，非法时抛出带语言名的 ValueError"""
+    """解析语言名，非法时抛出带语言名的 ValueError"""
     src = resolve(src_lang)
     tgt = resolve(tgt_lang)
     if src is None or tgt is None:
-        raise ValueError(f"不支持的语言: {src_lang} -> {tgt_lang}")
+        raise ValueError(
+            f"不支持的语言: {src_lang} -> {tgt_lang}（Hy-MT2 仅支持 38 个语种）")
     return src, tgt
 
 
-def _truncate_to_max_len(text: str, tokenizer, max_len: int = _MAX_INPUT_LEN) -> str:
-    """按 token 校验并截断超长文本，防止模型静默产生乱码/空输出"""
-    if not text:
-        return text
-    # 快速路径：短文本无需 tokenize 校验
-    if len(text) <= max_len:
-        return text
-    try:
-        ids = tokenizer.encode(text, add_special_tokens=False)
-        if len(ids) <= max_len:
-            return text
-        # 按 token 长度截断（保留前 max_len 个 token）
-        truncated_ids = ids[:max_len]
-        return tokenizer.decode(truncated_ids, skip_special_tokens=True).strip()
-    except Exception:
-        # tokenize 失败时退化为字符级截断，保证不产生超长输入
-        return text[:max_len]
+def translate_once(text: str, src_lang: str, tgt_lang: str) -> str:
+    """翻译一次文本（包含语言解析、长度截断和清理）"""
+    _src, tgt = _resolve_pair(src_lang, tgt_lang)
+    tokenizer, _model = _get_model()
+    safe_text = _truncate_to_max_len(text, tokenizer, _MAX_INPUT_LEN)
+    return _clean(hymt2.translate(safe_text, tgt, _device()))
 
 
 def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
@@ -209,43 +123,23 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
 
     Raises:
         FileNotFoundError: 模型文件缺失
-        ValueError: 语言配置非法或目标语言代码不受支持
+        ValueError: 语言配置非法
         RuntimeError: 推理时发生 CUDA OOM 等硬件/运行错误
     """
     if not texts:
         return []
-    src, tgt = _resolve_pair(src_lang, tgt_lang)
-    tokenizer, model = _get_model()
+    _src, tgt = _resolve_pair(src_lang, tgt_lang)
+    tokenizer, _model = _get_model()
     device = _device()
-    tokenizer.src_lang = src
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt)
-    if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
-        raise ValueError(f"不支持的目标语言代码: {tgt}")
 
     results: List[str] = [""] * len(texts)
     try:
-        with _torch().no_grad():
-            for i, text in enumerate(texts):
-                if stop_event is not None and stop_event.is_set():
-                    break
-                # 逐条校验 token 长度，超限时显式截断，避免静默乱码
-                safe_text = _truncate_to_max_len(text, tokenizer)
-                inputs = tokenizer(
-                    safe_text, return_tensors="pt", truncation=True,
-                    max_length=_MAX_INPUT_LEN)
-                inputs = {k: v.to(device) for k, v in inputs.items()}
-                outputs = model.generate(
-                    **inputs,
-                    forced_bos_token_id=forced_bos_token_id,
-                    max_length=_MAX_INPUT_LEN,
-                    num_beams=1,
-                    repetition_penalty=1.2,
-                )
-                decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-                results[i] = _clean(decoded[0])
-    except Exception:
-        # 异常向上抛给上层（gui 层捕获并分类提示），避免线程静默死亡
-        raise
+        for i, text in enumerate(texts):
+            if stop_event is not None and stop_event.is_set():
+                break
+            # 逐条校验 token 长度，超限时显式截断，避免静默乱码
+            safe_text = _truncate_to_max_len(text, tokenizer, _MAX_INPUT_LEN)
+            results[i] = _clean(hymt2.translate(safe_text, tgt, device))
     finally:
         _clear_cuda_cache()
     return results
@@ -260,13 +154,16 @@ def classify_translate_error(exc: BaseException) -> str:
     msg = str(exc)
     lowered = msg.lower()
     if isinstance(exc, FileNotFoundError) or "不存在" in msg:
-        return "模型文件缺失：请确认 ./nllb_model/ 目录存在，或通过 NLLB_MODEL_PATH 指定模型路径。"
-    if isinstance(exc, (ValueError,)) and ("不支持的语言" in msg or "语言代码" in msg):
+        return ("模型文件缺失：请确认 ./hymt2_model/ 目录内是完整的 Hy-MT2 模型"
+                "（或将 HYMT2_MODEL_PATH 指向本地模型目录）。")
+    if isinstance(exc, ValueError) and ("不支持的语言" in msg or "语言代码" in msg):
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"
-    if "cuda out of memory" in lowered or "out of memory" in lowered or "显存" in msg:
+    if "out of memory" in lowered or "显存" in msg:
         return "显存不足（CUDA out of memory）：请关闭其他占用显存的程序，或设置 GRASS_DEVICE=cpu 改用 CPU 推理。"
-    if isinstance(exc, ImportError) or "缺少依赖" in msg or "module 'torch'" in lowered or "no module named" in lowered:
+    if isinstance(exc, ImportError) or "缺少依赖" in msg or "no module named" in lowered:
         return f"依赖缺失：{msg} 请先 pip install -r requirements.txt。"
+    if "trust_remote_code" in lowered:
+        return ("模型需要加载自定义代码：确认为可信来源后，设置 GRASS_HYMT2_TRUST_REMOTE_CODE=1 再启动。")
     return f"翻译失败：{msg}"
 
 
@@ -279,13 +176,13 @@ def _preprocess(text: str) -> str:
 
 def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = None) -> List[str]:
     """按阈值分割文本
-    
+
     Args:
         text: 待分割文本
         threshold: 每段最大字符数
         puncts: 切分标点集合。None 时使用 DEFAULT_SPLIT_PUNCTS；
                 传空字符串表示禁用标点切分（仅按阈值硬切）
-        
+
     Returns:
         分割后的文本段列表
     """
@@ -327,18 +224,18 @@ def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = 
 
 
 def grass_translate(
-    text: str, 
-    rounds: int, 
-    pivot_langs: List[str], 
-    final_lang: str, 
-    threshold: int = 20, 
-    random_mode: str = "off", 
+    text: str,
+    rounds: int,
+    pivot_langs: List[str],
+    final_lang: str,
+    threshold: int = 20,
+    random_mode: str = "off",
     excluded_langs: Optional[List[str]] = None,
     split_puncts: Optional[str] = None,
     stop_event: Optional[threading.Event] = None
 ) -> Generator[Tuple, None, None]:
     """执行完整的生草翻译流程
-    
+
     Args:
         text: 输入文本
         rounds: 翻译轮数
@@ -349,7 +246,7 @@ def grass_translate(
         excluded_langs: 排除的语言列表
         split_puncts: 切分标点集合（None 使用默认集合）
         stop_event: 可选停止事件；在每段间检查，置位后立即中止生成
-        
+
     Yields:
         翻译进度和结果元组
     """
@@ -358,7 +255,7 @@ def grass_translate(
         raise ValueError(f"轮数必须至少为 1（当前: {rounds}）")
     segments = _split_by_threshold(text, threshold, split_puncts)
 
-    all_langs = [k for k in LANG_MAP if k not in ("中文", "中文（简体）", "中文（繁体）")]
+    all_langs = [name for name in LANG_NAMES if name != "中文"]
     major_langs = list(DEFAULT_PIVOT_LANGS)
 
     if excluded_langs:
