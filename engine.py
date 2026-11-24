@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """翻译引擎模块
 
-提供基于腾讯混元 Hy-MT2（本地部署）的多语言中转翻译能力。
-模型加载、提示词与推理细节见 hymt2.py；本模块负责分段、语言链与流程编排。
+提供本地多语言中转翻译能力。后端由 backend.py 按模型架构路由：
+- m2m100.py：Meta M2M-100（默认，418M 编码器-解码器）
+- hymt2.py：腾讯混元 Hy-MT2（可选）
+本模块负责分段、语言链与流程编排。
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import random
 import threading
 from typing import Generator, List, Optional, Tuple
 
+import backend
 import hymt2
 from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_NAMES
 
@@ -18,20 +21,31 @@ from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_NAMES
 DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
 # 连续标点视为一体（如 ... ？！ ……），切分时一并划入前段
 _ALL_PUNCTS = DEFAULT_SPLIT_PUNCTS + "…"
-# 模型的最大输入长度（按 token 计）
-_MAX_INPUT_LEN = hymt2.MAX_INPUT_TOKENS
+# 兼容旧调用点：权重检查/截断统一由后端提供
+_has_safetensors = backend.has_safetensors
 
-# 兼容旧调用点：权重检查/截断统一由 hymt2 提供
-_has_safetensors = hymt2.has_safetensors
-_truncate_to_max_len = hymt2.truncate_to_max_len
+
+def _truncate_to_max_len(text, tokenizer, max_len=None):
+    """按后端的上限截断文本（max_len 省略时取后端上限）"""
+    if max_len is None:
+        max_len = _max_input_len()
+    return backend.truncate_to_max_len(text, tokenizer, max_len)
+
+
+def _max_input_len() -> int:
+    """当前后端的输入上限（按 token 计）"""
+    try:
+        return backend.max_input_tokens()
+    except Exception:
+        return hymt2.MAX_INPUT_TOKENS
 
 # 计算设备：惰性解析（首次用到才检测），避免模块导入期依赖 CUDA / torch
 _DEVICE: Optional[str] = None
 
 
 def _torch():
-    """惰性导入 torch（委托给 hymt2，保持旧调用点可用）"""
-    return hymt2.torch()
+    """惰性导入 torch（委托给后端模块，保持旧调用点可用）"""
+    return backend.module().torch()
 
 
 def _device() -> str:
@@ -53,8 +67,8 @@ def _device() -> str:
 
 
 def _get_model():
-    """加载并缓存模型（供界面预热调用，真正的推理在 hymt2 内完成）"""
-    return hymt2.get_model(_device())
+    """加载并缓存模型（供界面预热调用，真正的推理在后端模块内完成）"""
+    return backend.get_model(_device())
 
 
 def get_device_info() -> str:
@@ -74,13 +88,19 @@ def get_device_info() -> str:
 
 def get_model_info() -> str:
     """返回模型信息，供界面显示"""
-    return f"Hy-MT2 · {os.path.basename(os.path.normpath(hymt2.model_path()))}"
+    try:
+        return backend.model_label()
+    except Exception:
+        return f"未知模型 · {os.path.basename(os.path.normpath(backend.model_path()))}"
 
 
 def _clear_cuda_cache():
     """推理后释放 CUDA 缓存，避免多段连续推理时显存累积"""
     if _DEVICE == "cuda":
-        hymt2.clear_cuda_cache(_DEVICE)
+        try:
+            backend.clear_cuda_cache(_DEVICE)
+        except Exception:
+            pass
 
 
 def _clean(text: str) -> str:
@@ -93,17 +113,21 @@ def _resolve_pair(src_lang: str, tgt_lang: str) -> Tuple[str, str]:
     src = resolve(src_lang)
     tgt = resolve(tgt_lang)
     if src is None or tgt is None:
+        try:
+            name = backend.model_label()
+        except Exception:
+            name = "当前模型"
         raise ValueError(
-            f"不支持的语言: {src_lang} -> {tgt_lang}（Hy-MT2 仅支持 38 个语种）")
+            f"不支持的语言: {src_lang} -> {tgt_lang}（{name} 不支持该语种）")
     return src, tgt
 
 
 def translate_once(text: str, src_lang: str, tgt_lang: str) -> str:
     """翻译一次文本（包含语言解析、长度截断和清理）"""
-    _src, tgt = _resolve_pair(src_lang, tgt_lang)
+    src, tgt = _resolve_pair(src_lang, tgt_lang)
     tokenizer, _model = _get_model()
-    safe_text = _truncate_to_max_len(text, tokenizer, _MAX_INPUT_LEN)
-    return _clean(hymt2.translate(safe_text, tgt, _device()))
+    safe_text = _truncate_to_max_len(text, tokenizer, _max_input_len())
+    return _clean(backend.translate(safe_text, src, tgt, _device()))
 
 
 def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
@@ -128,9 +152,10 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
     """
     if not texts:
         return []
-    _src, tgt = _resolve_pair(src_lang, tgt_lang)
+    src, tgt = _resolve_pair(src_lang, tgt_lang)
     tokenizer, _model = _get_model()
     device = _device()
+    max_len = _max_input_len()
 
     results: List[str] = [""] * len(texts)
     try:
@@ -138,8 +163,8 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
             if stop_event is not None and stop_event.is_set():
                 break
             # 逐条校验 token 长度，超限时显式截断，避免静默乱码
-            safe_text = _truncate_to_max_len(text, tokenizer, _MAX_INPUT_LEN)
-            results[i] = _clean(hymt2.translate(safe_text, tgt, device))
+            safe_text = _truncate_to_max_len(text, tokenizer, max_len)
+            results[i] = _clean(backend.translate(safe_text, src, tgt, device))
     finally:
         _clear_cuda_cache()
     return results
@@ -154,8 +179,8 @@ def classify_translate_error(exc: BaseException) -> str:
     msg = str(exc)
     lowered = msg.lower()
     if isinstance(exc, FileNotFoundError) or "不存在" in msg:
-        return ("模型文件缺失：请确认程序目录下的 hymt2_model/ 内是完整的 Hy-MT2 模型"
-                "（或将 HYMT2_MODEL_PATH 指向本地模型目录）。")
+        return ("模型文件缺失：请确认模型目录（默认 m2m100_model/ 或 hymt2_model/）"
+                "内有完整权重（或将 GRASS_MODEL_PATH 指向本地模型目录）。")
     if isinstance(exc, ValueError) and ("不支持的语言" in msg or "语言代码" in msg):
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"
     if "out of memory" in lowered or "显存" in msg:
@@ -164,6 +189,8 @@ def classify_translate_error(exc: BaseException) -> str:
         return f"依赖缺失：{msg} 请先 pip install -r requirements.txt。"
     if "trust_remote_code" in lowered:
         return ("模型需要加载自定义代码：确认为可信来源后，设置 GRASS_HYMT2_TRUST_REMOTE_CODE=1 再启动。")
+    if "无法识别模型架构" in msg:
+        return f"模型配置异常：{msg}"
     return f"翻译失败：{msg}"
 
 

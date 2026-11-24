@@ -94,6 +94,17 @@ def test_default_pivots_are_supported():
         assert languages.resolve(lang) == lang
 
 
-def test_supported_count_matches_model_card():
-    # Hy-MT2 官方语言表为 38 个语种/变体
-    assert len(languages.LANG_MAP) == 38
+def test_language_tables_match_model_cards():
+    import langdata
+    # Hy-MT2 官方语言表为 38 个语种/变体；M2M-100 只暴露常用子集
+    assert len(langdata.HYMT2_LANGS) == 38
+    assert len(langdata.M2M100_LANGS) >= 70
+    for table in (langdata.HYMT2_LANGS, langdata.M2M100_LANGS):
+        codes = list(table.values())
+        assert len(codes) == len(set(codes))
+
+
+def test_m2m100_drops_variants_it_lacks():
+    from langdata import M2M100_LANGS
+    for lang in ("繁体中文", "粤语", "藏语", "维吾尔语"):
+        assert lang not in M2M100_LANGS

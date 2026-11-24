@@ -118,12 +118,16 @@ def test_has_safetensors(tmp_path):
 
 
 def test_resolve_language():
-    from languages import resolve
+    from languages import resolve, backend
     assert resolve("中") == "中文"
     assert resolve("英语") == "英语"
-    assert resolve("zh-Hant") == "繁体中文"
-    assert resolve("中文（繁体）") == "繁体中文"
     assert resolve("不存在的语言") is None
+    if backend() == "hymt2":
+        assert resolve("zh-Hant") == "繁体中文"
+        assert resolve("中文（繁体）") == "繁体中文"
+    else:
+        # M2M-100 没有繁体中文
+        assert resolve("zh-Hant") is None
 
 
 # ===== 错误分类 =====

@@ -14,17 +14,35 @@ conda activate grass
 pip install -r requirements.txt
 ```
 
-模型为 **腾讯混元 Hy-MT2-1.8B**（Apache-2.0），本地部署，放于 `./hymt2_model/`。
-从 Hugging Face / ModelScope 下载 `tencent/Hy-MT2-1.8B`（或 7B / 30B-A3B、FP8、GGUF 版本）后，把整个模型目录放进 `hymt2_model/` 即可。
+模型本地部署，**按模型目录里 `config.json` 的 `architectures` 自动识别后端**，两种都支持：
+
+| 后端 | 默认目录 | 参数 | 语种 | 许可 | 说明 |
+|---|---|---|---|---|---|
+| **M2M-100**（默认，v1.7 起） | `m2m100_model/` | 418M | 100（本程序暴露 76 个常用） | MIT | "直译味"重，生草效果明显，CPU 快一个量级 |
+| Hy-MT2 | `hymt2_model/` | 1.8B | 38（含繁体/粤语/藏/维） | Apache-2.0 | 质量太高，几乎不生草；适合要"准确"的场景 |
+
+下载（ModelScope，国内直连）：
+
+```bash
+pip install modelscope
+
+# 默认后端 M2M-100（约 1.9GB）
+modelscope download --model facebook/m2m100_418M --local_dir .\m2m100_model
+
+# 可选后端 Hy-MT2（约 3.9GB）
+modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model
+```
+
+语言列表会跟着后端变：M2M-100 没有繁体中文、粤语、藏语、维吾尔语，选这些会在翻译时被拒绝（界面列表里也不会出现）。
 
 > **安全提示**：模型目录的 `config.json` 由 `transformers` 解析，请只使用可信来源的模型；
 > 目录内若存在 `*.safetensors` 权重，程序会强制优先使用，避免 pickle 反序列化带来的代码执行风险。
 > 默认**不**开启 `trust_remote_code`；确认为可信来源且模型确实需要时，才设置 `GRASS_HYMT2_TRUST_REMOTE_CODE=1`。
 
-**自定义模型路径**：设置环境变量 `HYMT2_MODEL_PATH` 可指定模型位置，例如：
+**自定义模型路径**：设置环境变量 `GRASS_MODEL_PATH`（旧写法 `HYMT2_MODEL_PATH` 继续兼容）可指定模型位置，例如：
 ```bash
-set HYMT2_MODEL_PATH=D:\models\hymt2_model   # Windows
-export HYMT2_MODEL_PATH=/path/to/hymt2_model  # Linux/macOS
+set GRASS_MODEL_PATH=D:\models\m2m100_model    # Windows
+export GRASS_MODEL_PATH=/path/to/m2m100_model  # Linux/macOS
 ```
 
 **设备与精度**：程序自动检测 CUDA，有显卡时用 GPU + bfloat16（不支持时退 float16）推理，CPU 则用 float32；每段翻译后自动释放显存缓存。也可用 `GRASS_DEVICE` 强制指定：
@@ -33,10 +51,11 @@ set GRASS_DEVICE=cpu    # 强制使用 CPU
 set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 ```
 
-> 提示：1.8B 模型在 CPU 上逐句推理较慢（生草流程一次要跑几十上百次翻译），建议优先使用 GPU。
+> 提示：Hy-MT2-1.8B 在 CPU 上逐句推理较慢（生草流程一次要跑几十上百次翻译）；M2M-100-418M 是编码器-解码器结构，同一个 CPU 上快一个量级。
 >
-> **CPU 实测参考**（Ryzen 9 7950X / 32 线程 / 无 GPU / float32）：模型加载约 31 秒；单句翻译 3–7 秒；
-> 一段 3 轮中转（4 次调用）约 36 秒。按此推算，10 段 × 7 轮的中等任务在 CPU 上需要十分钟量级。
+> **CPU 实测参考**（Ryzen 9 7950X / 32 线程 / 无 GPU / float32）：
+> M2M-100-418M 加载约 5 秒、单句 0.2–0.5 秒；
+> Hy-MT2-1.8B 加载 31–46 秒、单句 3–7 秒、一段 3 轮中转约 36 秒。
 
 ## Windows 免安装版（exe）
 

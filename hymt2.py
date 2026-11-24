@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 import threading
+
+import modelpath
 from typing import Optional, Tuple
 
 # 官方默认提示词：源语言由模型自行判断，只需给出目标语言
@@ -29,13 +30,11 @@ MAX_INPUT_TOKENS = 2048
 MAX_NEW_TOKENS = 1024
 
 def base_dir() -> str:
-    """程序所在目录：源码运行时是本文件目录，PyInstaller 打包后是 exe 所在目录"""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    """程序所在目录（兼容旧接口，实现在 modelpath）"""
+    return modelpath.base_dir()
 
 
-_MODEL_PATH = os.environ.get("HYMT2_MODEL_PATH") or os.path.join(base_dir(), "hymt2_model")
+_MODEL_PATH = modelpath.model_dir("hymt2")
 
 _MODEL = None
 _TOKENIZER = None
@@ -55,6 +54,11 @@ _QUOTE_PAIRS = {'"': '"', "“": "”", "'": "'", "「": "」", "『": "』", "�
 def model_path() -> str:
     """当前模型目录（供界面提示与错误信息使用）"""
     return _MODEL_PATH
+
+
+def model_label() -> str:
+    """界面显示用的模型名"""
+    return f"Hy-MT2 · {os.path.basename(os.path.normpath(_MODEL_PATH))}"
 
 
 def torch():
@@ -190,8 +194,12 @@ def _max_new_tokens(text: str) -> int:
     return max(64, min(MAX_NEW_TOKENS, estimate))
 
 
-def translate(text: str, target_lang: str, device: str) -> str:
-    """单次翻译：显式返回译文（不含提示词与前后空白）"""
+def translate(text: str, src_lang: str, tgt_lang: str, device: str) -> str:
+    """单次翻译：显式返回译文（不含提示词与前后空白）
+
+    源语言由模型自行判断，src_lang 只用于调用方统一接口，不进入提示词。
+    """
+    target_lang = tgt_lang
     tokenizer, model = get_model(device)
     prompt = build_prompt(text, target_lang)
     messages = [{"role": "user", "content": prompt}]
