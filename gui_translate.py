@@ -52,7 +52,7 @@ class TranslateMixin:
         self._seg_counter.configure(text=f"0 / {len(self._segments)}")
         self._step_label.configure(text="")
         self._status_label.configure(text="● 翻译中...", text_color=COLORS["accent"])
-        self.title("生草机 — 翻译中...")
+        self._set_title("翻译中...")
 
         rounds = self._rounds_var.get()
         pivot_langs = [v.get() for v in self._lang_vars]
@@ -95,7 +95,7 @@ class TranslateMixin:
         self._start_btn.configure(text="▶ 开始翻译")
         self._animate_btn_color(self._start_btn, COLORS["accent"], COLORS["accent_hover"])
         self._status_label.configure(text=" 已停止", text_color=COLORS["text_secondary"])
-        self.title("生草机")
+        self._set_title()
 
     def _poll_queue(self):
         if not self._running:
@@ -153,7 +153,7 @@ class TranslateMixin:
             self._status_label.configure(text=f"✓ 翻译完成 ({time_str})", text_color=COLORS["success"])
             self._step_label.configure(text="")
             self._animate_progress(1)
-            self.title("生草机 — 翻译完成")
+            self._set_title("翻译完成")
             result_text = self._result_box.get("1.0", "end-1c")
             if result_text and self._auto_copy_var.get():
                 self.clipboard_clear()
@@ -168,7 +168,7 @@ class TranslateMixin:
             self._start_btn.configure(text="▶ 开始翻译")
             self._animate_btn_color(self._start_btn, COLORS["accent"], COLORS["accent_hover"])
             self._status_label.configure(text="⏹ 已停止", text_color=COLORS["text_secondary"])
-            self.title("生草机")
+            self._set_title()
             if self._seg_results:
                 self._add_history_entry(stopped=True)
         elif kind == "error":
@@ -177,7 +177,7 @@ class TranslateMixin:
             self._start_btn.configure(text="▶ 开始翻译")
             self._animate_btn_color(self._start_btn, COLORS["accent"], COLORS["accent_hover"])
             self._status_label.configure(text=f"✗ 错误: {msg[1]}", text_color=COLORS["error"])
-            self.title("生草机 — 错误")
+            self._set_title("错误")
 
     def _update_card_state(self, si, state):
         if self._split_view:

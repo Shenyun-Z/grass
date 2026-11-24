@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.0.0**（`python main.py --version` 可查看）。
 
 ## 原理
 
@@ -73,11 +73,22 @@ python main.py
 | Ctrl+H | 打开历史记录 |
 | Escape | 停止翻译 |
 
+## 开发与测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest            # 60 个用例，覆盖分段、语言链、配置名校验、历史记录规整、文件读取与导出转义
+```
+
+测试不需要模型权重与 GPU：`engine.py` 的 `torch` / `transformers` 为惰性导入，逻辑层测试通过
+`monkeypatch` 替换 `translate_batch`，模型缺失不会影响 GUI 启动（界面会给出缺失依赖提示）。
+
 ## 项目结构
 
 ```
 grass/
-├── main.py              # 入口
+├── main.py              # 入口（--version 打印版本）
+├── version.py           # 版本号唯一来源
 ├── gui.py               # 主应用（Mixin 组合模式）
 ├── gui_split_view.py    # 分块预览组件（控件池复用）
 ├── gui_compare.py       # 对照视图组件（双栏卡片对比）
@@ -89,8 +100,10 @@ grass/
 ├── gui_styles.py        # 设计系统（颜色、字体、样式函数）
 ├── engine.py            # 翻译引擎
 ├── languages.py         # 语言定义与映射
+├── validators.py        # 输入校验与安全辅助（无 GUI/torch 依赖，可单测）
+├── tests/               # pytest 用例
 ├── nllb_model/          # NLLB-200-600M 模型文件
-├── requirements.txt     # Python 依赖
+├── requirements.txt     # 运行依赖（已加版本区间）
 └── configs/             # 用户保存的配置文件
 ```
 

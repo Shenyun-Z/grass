@@ -16,3 +16,6 @@ _release_notes.md
 
 # 运行时生成的本地数据
 history.json
+
+# 测试缓存
+.pytest_cache/
