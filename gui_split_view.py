@@ -112,6 +112,7 @@ class SplitView:
         self._states = {}
         self._total_height = 0
         self._canvas_width = 0
+        self._render_pending = False
         self._build()
 
     def _build(self):
@@ -160,17 +161,31 @@ class SplitView:
         self._segments = segments
         self._states = {i: "waiting" for i in range(len(segments))}
         self._results = {}
-        self._render()
+        self._schedule_render()
 
     def update_result(self, index, result):
         """更新某段翻译结果"""
         self._results[index] = result
         self._states[index] = "done"
-        self._render()
+        self._schedule_render()
 
     def update_state(self, index, state):
         """更新某段状态"""
         self._states[index] = state
+        self._schedule_render()
+
+    def _schedule_render(self):
+        """合并同一轮事件循环内的多次更新，避免逐 step 全量重排"""
+        if self._render_pending:
+            return
+        self._render_pending = True
+        try:
+            self._parent.after_idle(self._flush_render)
+        except Exception:
+            self._render_pending = False
+
+    def _flush_render(self):
+        self._render_pending = False
         self._render()
 
     def _render(self):

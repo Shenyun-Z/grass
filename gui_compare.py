@@ -32,6 +32,7 @@ class CompareView:
         self._left_items = []
         self._right_items = []
         self._canvas_width = 0
+        self._render_pending = False
         self._build()
 
     def _build(self):
@@ -75,11 +76,22 @@ class CompareView:
         self._render()
 
     def set_data(self, left_title, left_items, right_title, right_items):
-        """设置对照数据并重渲染"""
+        """设置对照数据并在本轮事件循环内合并渲染"""
         self._left_title = left_title
         self._right_title = right_title
         self._left_items = list(left_items)
         self._right_items = list(right_items)
+        if self._render_pending:
+            return
+        self._render_pending = True
+        try:
+            self._parent.after_idle(self._flush_render)
+        except Exception:
+            self._render_pending = False
+            self._render()
+
+    def _flush_render(self):
+        self._render_pending = False
         self._render()
 
     def _get_or_create_card(self, index):
