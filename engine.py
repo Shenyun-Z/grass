@@ -71,6 +71,14 @@ def _device() -> str:
     return _DEVICE
 
 
+def _has_safetensors(model_dir: str) -> bool:
+    """模型目录内是否存在 safetensors 权重（优先使用，避免 pickle 反序列化风险）"""
+    try:
+        return any(name.endswith(".safetensors") for name in os.listdir(model_dir))
+    except OSError:
+        return False
+
+
 def _get_model():
     """加载并缓存模型（懒加载，自动使用 GPU 加速，加锁防并发半初始化）"""
     global _MODEL, _TOKENIZER
@@ -81,8 +89,12 @@ def _get_model():
                     raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
                 AutoTokenizer, AutoModelForSeq2SeqLM = _transformers()
                 device = _device()
-                tokenizer = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
-                model = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
+                load_kwargs = {"local_files_only": True}
+                # 仅在本地目录确实带 safetensors 时强制使用，其余情况交给默认策略
+                if _has_safetensors(_MODEL_PATH):
+                    load_kwargs["use_safetensors"] = True
+                tokenizer = AutoTokenizer.from_pretrained(_MODEL_PATH, **load_kwargs)
+                model = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, **load_kwargs)
                 if device == "cuda":
                     # 显式启用 CUDA 并转半精度，显著降低显存占用、提升推理速度
                     model.half()

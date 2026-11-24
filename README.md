@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v1.4.0**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.4.1**（`python main.py --version` 可查看）。
 
 ## 原理
 
@@ -15,6 +15,9 @@ pip install -r requirements.txt
 ```
 
 模型文件放置于 `./nllb_model/`（NLLB-200-600M）。
+
+> **安全提示**：模型目录的 `config.json` 由 `transformers` 解析，请只使用可信来源的模型；
+> 目录内若存在 `*.safetensors` 权重，程序会强制优先使用，避免 pickle 反序列化带来的代码执行风险。
 
 **自定义模型路径**：设置环境变量 `NLLB_MODEL_PATH` 可指定模型位置，例如：
 ```bash

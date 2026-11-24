@@ -110,6 +110,13 @@ def test_truncate_to_max_len():
     assert engine._truncate_to_max_len("x" * 30, tok, max_len=10) == "-" * 10
 
 
+def test_has_safetensors(tmp_path):
+    assert engine._has_safetensors(str(tmp_path)) is False
+    (tmp_path / "model.safetensors").write_bytes(b"")
+    assert engine._has_safetensors(str(tmp_path)) is True
+    assert engine._has_safetensors(str(tmp_path / "missing")) is False
+
+
 def test_resolve_language():
     from languages import resolve
     assert resolve("中") == "zho_Hans"
