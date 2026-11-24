@@ -5,12 +5,8 @@
 """
 import os
 import random
-import re
 import threading
 from typing import Generator, List, Optional, Tuple
-
-import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_MAP
 
@@ -24,10 +20,55 @@ _MAX_INPUT_LEN = 512
 _MODEL = None
 _TOKENIZER = None
 _MODEL_PATH = os.environ.get("NLLB_MODEL_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "nllb_model")
-# 计算设备：优先 GRASS_DEVICE 环境变量强制指定，否则自动检测 CUDA
-_DEVICE = os.environ.get("GRASS_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
+# 计算设备：惰性解析（首次用到才检测），避免模块导入期依赖 CUDA / torch
+_DEVICE: Optional[str] = None
 # 模型加载锁：防止并发进入 _get_model 造成半初始化
 _MODEL_LOCK = threading.Lock()
+
+_TORCH = None
+_TRANSFORMERS = None
+
+
+def _torch():
+    """惰性导入 torch：缺依赖时抛出可读的 ImportError，而不是让程序在导入期崩溃"""
+    global _TORCH
+    if _TORCH is None:
+        try:
+            import torch
+        except ImportError as exc:
+            raise ImportError("缺少依赖 torch：请先执行 pip install -r requirements.txt") from exc
+        _TORCH = torch
+    return _TORCH
+
+
+def _transformers():
+    """惰性导入 transformers，返回 (AutoTokenizer, AutoModelForSeq2SeqLM)"""
+    global _TRANSFORMERS
+    if _TRANSFORMERS is None:
+        try:
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        except ImportError as exc:
+            raise ImportError("缺少依赖 transformers：请先执行 pip install -r requirements.txt") from exc
+        _TRANSFORMERS = (AutoTokenizer, AutoModelForSeq2SeqLM)
+    return _TRANSFORMERS
+
+
+def _device() -> str:
+    """解析计算设备：GRASS_DEVICE 优先，其次自动检测 CUDA"""
+    global _DEVICE
+    if _DEVICE is None:
+        forced = (os.environ.get("GRASS_DEVICE") or "").strip().lower()
+        if forced:
+            if forced not in ("cpu", "cuda"):
+                raise ValueError(f"GRASS_DEVICE 取值非法：{forced}（仅支持 cpu / cuda）")
+            if forced == "cuda" and not _torch().cuda.is_available():
+                raise RuntimeError(
+                    "GRASS_DEVICE=cuda 但未检测到可用 CUDA 设备：请改用 CPU 推理"
+                    "（取消 GRASS_DEVICE 或设为 cpu）")
+            _DEVICE = forced
+        else:
+            _DEVICE = "cuda" if _torch().cuda.is_available() else "cpu"
+    return _DEVICE
 
 
 def _get_model():
@@ -38,21 +79,29 @@ def _get_model():
             if _MODEL is None:  # 双重检查，避免重复加载
                 if not os.path.exists(_MODEL_PATH):
                     raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
-                _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
-                _MODEL = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
-                if _DEVICE == "cuda":
+                AutoTokenizer, AutoModelForSeq2SeqLM = _transformers()
+                device = _device()
+                tokenizer = AutoTokenizer.from_pretrained(_MODEL_PATH, local_files_only=True)
+                model = AutoModelForSeq2SeqLM.from_pretrained(_MODEL_PATH, local_files_only=True)
+                if device == "cuda":
                     # 显式启用 CUDA 并转半精度，显著降低显存占用、提升推理速度
-                    _MODEL.half()
-                _MODEL.to(_DEVICE)
-                _MODEL.eval()
+                    model.half()
+                model.to(device)
+                model.eval()
+                # 全部初始化成功后才对外发布，避免异常时留下半初始化的全局状态
+                _TOKENIZER, _MODEL = tokenizer, model
     return _TOKENIZER, _MODEL
 
 
 def get_device_info() -> str:
     """返回当前计算设备信息，供界面显示"""
-    if _DEVICE == "cuda":
+    try:
+        device = _device()
+    except Exception:
+        return "CPU"
+    if device == "cuda":
         try:
-            name = torch.cuda.get_device_name(0)
+            name = _torch().cuda.get_device_name(0)
             return f"GPU（CUDA）· {name}"
         except Exception:
             return "GPU（CUDA）"
@@ -63,7 +112,7 @@ def _clear_cuda_cache():
     """推理后释放 CUDA 缓存，避免多段连续推理时显存累积"""
     if _DEVICE == "cuda":
         try:
-            torch.cuda.empty_cache()
+            _torch().cuda.empty_cache()
         except Exception:
             pass
 
@@ -76,17 +125,18 @@ def _clean(text: str) -> str:
 def _nllb_translate(text: str, src_lang: str, tgt_lang: str) -> str:
     """执行单次 NLLB 翻译"""
     tokenizer, model = _get_model()
+    device = _device()
     tokenizer.src_lang = src_lang
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-    inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=_MAX_INPUT_LEN)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
     if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
         raise ValueError(f"不支持的目标语言代码: {tgt_lang}")
-    with torch.no_grad():
+    with _torch().no_grad():
         outputs = model.generate(
             **inputs,
             forced_bos_token_id=forced_bos_token_id,
-            max_length=512,
+            max_length=_MAX_INPUT_LEN,
             num_beams=1,
             repetition_penalty=1.2,
         )
@@ -154,6 +204,7 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
         return []
     src, tgt = _resolve_pair(src_lang, tgt_lang)
     tokenizer, model = _get_model()
+    device = _device()
     tokenizer.src_lang = src
     forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt)
     if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
@@ -161,7 +212,7 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
 
     results: List[str] = [""] * len(texts)
     try:
-        with torch.no_grad():
+        with _torch().no_grad():
             for i, text in enumerate(texts):
                 if stop_event is not None and stop_event.is_set():
                     break
@@ -170,7 +221,7 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
                 inputs = tokenizer(
                     safe_text, return_tensors="pt", truncation=True,
                     max_length=_MAX_INPUT_LEN)
-                inputs = {k: v.to(_DEVICE) for k, v in inputs.items()}
+                inputs = {k: v.to(device) for k, v in inputs.items()}
                 outputs = model.generate(
                     **inputs,
                     forced_bos_token_id=forced_bos_token_id,
@@ -202,7 +253,7 @@ def classify_translate_error(exc: BaseException) -> str:
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"
     if "cuda out of memory" in lowered or "out of memory" in lowered or "显存" in msg:
         return "显存不足（CUDA out of memory）：请关闭其他占用显存的程序，或设置 GRASS_DEVICE=cpu 改用 CPU 推理。"
-    if "module 'torch'" in lowered or "no module named" in lowered:
+    if isinstance(exc, ImportError) or "缺少依赖" in msg or "module 'torch'" in lowered or "no module named" in lowered:
         return f"依赖缺失：{msg} 请先 pip install -r requirements.txt。"
     return f"翻译失败：{msg}"
 
@@ -228,6 +279,8 @@ def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = 
     """
     if not text:
         return []
+    if threshold < 1:
+        threshold = 1
     punct_set = DEFAULT_SPLIT_PUNCTS if puncts is None else puncts
 
     segments = []
@@ -251,7 +304,9 @@ def _split_by_threshold(text: str, threshold: int = 20, puncts: Optional[str] = 
             i += 1
     if start < n:
         tail = text[start:]
-        if not segments and len(tail) > threshold * 2:
+        # 尾部若明显超过 2 倍阈值（例如整段无标点的长文），按阈值硬切，
+        # 否则单段过长会被模型截断，造成内容静默丢失
+        if len(tail) > threshold * 2:
             for j in range(0, len(tail), threshold):
                 segments.append(tail[j:j + threshold])
         else:
@@ -287,6 +342,8 @@ def grass_translate(
         翻译进度和结果元组
     """
     text = _preprocess(text)
+    if rounds is None or rounds < 1:
+        raise ValueError(f"轮数必须至少为 1（当前: {rounds}）")
     segments = _split_by_threshold(text, threshold, split_puncts)
 
     all_langs = [k for k in LANG_MAP if k not in ("中文", "中文（简体）", "中文（繁体）")]
@@ -300,6 +357,9 @@ def grass_translate(
         lang_seq = (pivot_langs * ((rounds // len(pivot_langs)) + 1))[:rounds] if pivot_langs else []
     else:
         pool = major_langs if random_mode == "low" else all_langs
+        if not pool:
+            # 排除语言过多时选池可能为空，显式报错，避免 random.choice 抛 IndexError
+            raise ValueError("随机选池为空：被排除的语言过多，请至少保留一种可用语言")
         lang_seq = []
         prev = None
         for _ in range(rounds):
