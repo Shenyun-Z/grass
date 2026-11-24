@@ -313,6 +313,9 @@ class LangsPane(Card):
         self._chain = QLabel("")
         self._chain.setObjectName("chain")
         self._chain.setWordWrap(True)
+        # 必须允许横向被压到最窄，否则 QLabel 会按整行文本要宽度，长语言链会被裁掉
+        self._chain.setMinimumWidth(1)
+        self._chain.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self._chain.setFont(font(size=10))
         self.body().addWidget(self._chain)
 
@@ -465,27 +468,40 @@ class SplitPane(Card):
         self._delegate = CardDelegate("segment")
         self.view = VirtualCardsView(self._delegate)
         self.view.setModel(self.model)
-        self.view.setFixedHeight(self._view_height)
         self.view.rowClicked.connect(self.segClicked.emit)
-        self.body().addWidget(self.view)
+
+        self._empty_page = QFrame()
+        self._empty_page.setObjectName("cardFlat")
+        empty_layout = QVBoxLayout(self._empty_page)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty = QLabel("输入文本后，这里会按段显示原文与译文")
+        empty.setAlignment(Qt.AlignCenter)
+        empty.setObjectName("caption")
+        empty_layout.addWidget(empty)
+
+        self._stack = QStackedWidget()
+        self._stack.setFixedHeight(self._view_height)
+        self._stack.addWidget(self._empty_page)
+        self._stack.addWidget(self.view)
+        self._stack.setCurrentWidget(self._empty_page)
+        self.body().addWidget(self._stack)
 
         self._grip = GripHandle()
         self._grip.deltaDragged.connect(self._on_grip)
         self.body().addWidget(self._grip)
 
     def _toggle(self) -> None:
-        collapsed = self.view.isVisible()
+        collapsed = self._stack.isVisible()
         self._arrow.setText("▶" if collapsed else "▼")
-        self.view.setVisible(not collapsed)
+        self._stack.setVisible(not collapsed)
         self._grip.setVisible(not collapsed)
-        if not collapsed:
-            self.view.setFixedHeight(self._view_height)
 
     def auto_follow(self) -> bool:
         return self._auto_follow.isChecked()
 
     def set_segments(self, segments: list[str]) -> None:
         self.model.set_segments(segments)
+        self._stack.setCurrentWidget(self.view if segments else self._empty_page)
         self.view.refresh_layout()
 
     def update_result(self, row: int, text: str) -> None:
@@ -515,7 +531,7 @@ class SplitPane(Card):
     def _on_grip(self, delta: int) -> None:
         new_h = max(px(self.MIN_HEIGHT), min(px(self.MAX_HEIGHT), self._view_height + delta))
         self._view_height = new_h
-        self.view.setFixedHeight(new_h)
+        self._stack.setFixedHeight(new_h)
 
     def refresh_fonts(self) -> None:
         self.view.refresh_layout(clear_cache=True)
