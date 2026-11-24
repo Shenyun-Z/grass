@@ -11,16 +11,14 @@ M2M-100 是编码器-解码器结构的多语言翻译模型（100 个语言代�
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
-import shutil
-import tempfile
 import threading
 from typing import Optional, Tuple
 
 import langdata
 import modelpath
+import pathmirror
 
 # M2M-100 的输入上限按 512 token（position embedding 最多 1024，留余量给解码）
 MAX_INPUT_TOKENS = 512
@@ -103,32 +101,9 @@ TOKENIZER_FILES = (
 )
 
 
-def _is_ascii(path: str) -> bool:
-    try:
-        path.encode("ascii")
-        return True
-    except UnicodeEncodeError:
-        return False
-
-
 def ascii_tokenizer_dir(model_dir: str) -> str:
     """返回可用于加载分词器的目录：原目录纯 ASCII 就用原目录，否则返回临时镜像目录"""
-    if _is_ascii(os.path.abspath(model_dir)):
-        return model_dir
-    digest = hashlib.sha1(os.path.abspath(model_dir).encode("utf-8")).hexdigest()[:10]
-    mirror = os.path.join(tempfile.gettempdir(), "grass-m2m100-tokenizer-" + digest)
-    try:
-        os.makedirs(mirror, exist_ok=True)
-        for name in TOKENIZER_FILES:
-            src = os.path.join(model_dir, name)
-            dst = os.path.join(mirror, name)
-            if os.path.exists(src) and (not os.path.exists(dst)
-                                        or os.path.getsize(src) != os.path.getsize(dst)):
-                shutil.copyfile(src, dst)
-    except OSError:
-        # 复制失败就退回原目录，让加载过程报出更准确的错误
-        return model_dir
-    return mirror
+    return pathmirror.mirrored_dir(model_dir, TOKENIZER_FILES, "m2m100")
 
 
 def _quiet_transformers() -> None:

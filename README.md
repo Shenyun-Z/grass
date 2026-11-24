@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v1.6**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.7**（`python main.py --version` 可查看）。
 
 ## 原理
 
@@ -14,11 +14,12 @@ conda activate grass
 pip install -r requirements.txt
 ```
 
-模型本地部署，**按模型目录里 `config.json` 的 `architectures` 自动识别后端**，两种都支持：
+模型本地部署，**按模型目录里 `config.json` 的 `architectures` 自动识别后端**，三种都支持：
 
 | 后端 | 默认目录 | 参数 | 语种 | 许可 | 说明 |
 |---|---|---|---|---|---|
-| **M2M-100**（默认，v1.7 起） | `m2m100_model/` | 418M | 100（本程序暴露 76 个常用） | MIT | "直译味"重，生草效果明显，CPU 快一个量级 |
+| **MiLMMT-46**（默认，v1.7 起） | `milmmt_model/` | 1B | 46（含繁体中文/粤语，无藏/维/蒙） | Gemma | 质量明显高于 M2M、低于 Hy-MT2，翻译稳定不吐占位符 |
+| M2M-100 | `m2m100_model/` | 418M | 100（本程序暴露 76 个常用） | MIT | "直译味"最重、生草最狠，CPU 最快，但会丢词 |
 | Hy-MT2 | `hymt2_model/` | 1.8B | 38（含繁体/粤语/藏/维） | Apache-2.0 | 质量太高，几乎不生草；适合要"准确"的场景 |
 
 下载（ModelScope，国内直连）：
@@ -26,14 +27,19 @@ pip install -r requirements.txt
 ```bash
 pip install modelscope
 
-# 默认后端 M2M-100（约 1.9GB）
+# 默认后端 MiLMMT-46-1B（约 2.0GB）
+modelscope download --model xiaomi-research/MiLMMT-46-1B-v1.0 --local_dir .\milmmt_model
+
+# 可选后端 M2M-100（约 1.9GB）
 modelscope download --model facebook/m2m100_418M --local_dir .\m2m100_model
 
 # 可选后端 Hy-MT2（约 3.9GB）
 modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model
 ```
 
-语言列表会跟着后端变：M2M-100 没有繁体中文、粤语、藏语、维吾尔语，选这些会在翻译时被拒绝（界面列表里也不会出现）。
+语言列表会跟着后端变：MiLMMT-46 有繁体中文、粤语，但没有藏语、维吾尔语、蒙古语；M2M-100 连繁体中文和粤语也没有。选不支持的语言会在翻译时被拒绝（界面列表里也不会出现）。
+
+> MiLMMT-46 的指令跟随能力在后训练阶段被大幅削弱，官方要求用固定提示词并显式写出源语言（没有自动识别模式）。程序已按官方格式拼 `Translate this from <源语言> to <目标语言>:`，并给语言名做了官方的英文名映射，不要自己改提示词。
 
 > **安全提示**：模型目录的 `config.json` 由 `transformers` 解析，请只使用可信来源的模型；
 > 目录内若存在 `*.safetensors` 权重，程序会强制优先使用，避免 pickle 反序列化带来的代码执行风险。
@@ -51,19 +57,20 @@ set GRASS_DEVICE=cpu    # 强制使用 CPU
 set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 ```
 
-> 提示：Hy-MT2-1.8B 在 CPU 上逐句推理较慢（生草流程一次要跑几十上百次翻译）；M2M-100-418M 是编码器-解码器结构，同一个 CPU 上快一个量级。
+> 提示：MiLMMT-46 是解码器模型，逐 token 生成，CPU 上比 M2M-100 慢；生草流程一次要跑几十上百次翻译，段落多时会明显等。
 >
 > **CPU 实测参考**（Ryzen 9 7950X / 32 线程 / 无 GPU / float32）：
+> MiLMMT-46-1B 加载约 3 秒、单句 2.8–4.3 秒、3 轮中转约 14 秒、5 轮约 22 秒；
 > M2M-100-418M 加载约 6.5 秒、单句 0.9–1.2 秒、2 段 × 5 轮（12 次调用）约 11 秒；
 > Hy-MT2-1.8B 加载 31–46 秒、单句 3–7 秒、一段 3 轮中转约 36 秒。
 
 ## Windows 免安装版（exe）
 
-Release 里附带 `grass-v1.6-win64.zip`，解压后双击 `生草机.exe` 即可运行，**不需要装 Python**。
+Release 里附带 `grass-v1.7-win64.zip`，解压后双击 `生草机.exe` 即可运行，**不需要装 Python**。解压到中文目录（如 `生草机\`）或纯英文目录都可以。
 
-- 包里**不含模型权重**（约 3.9GB）。首次运行前把 `hymt2_model\` 放到 `生草机.exe` 同级目录，
-  或用 `HYMT2_MODEL_PATH` 指向模型目录；详细步骤见包内 `模型下载说明.txt`
-- 下载：`modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model`
+- 包里**不含模型权重**（约 2.0GB）。首次运行前把 `milmmt_model\` 放到 `生草机.exe` 同级目录，
+  或用 `GRASS_MODEL_PATH` 指向模型目录；详细步骤见包内 `模型下载说明.txt`
+- 下载：`modelscope download --model xiaomi-research/MiLMMT-46-1B-v1.0 --local_dir .\milmmt_model`
 - 默认 CPU 推理（构建的 exe 不带 CUDA 运行库）；有显卡想用 GPU 的走源码安装路径
 - 自己打包：`powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
   （需先 `pip install pyinstaller`，产物在 `dist\`）
@@ -122,7 +129,7 @@ pip install -r requirements-dev.txt
 pytest            # 84 个用例，覆盖分段、语言链、提示词与输出清理、语言表一致性、配置名校验、历史记录规整、文件读取与导出转义
 ```
 
-测试不需要模型权重与 GPU：`hymt2.py` 的 `torch` / `transformers` 为惰性导入，逻辑层测试通过
+测试不需要模型权重与 GPU：各后端模块的 `torch` / `transformers` 为惰性导入，逻辑层测试通过
 `monkeypatch` 替换 `translate_batch`，模型缺失不会影响 GUI 启动（界面会给出缺失提示）。
 
 ## 项目结构
@@ -141,10 +148,18 @@ grass/
 ├── gui_dialogs.py       # 弹窗（语言选择、排除语言、预设、翻译过程详情、历史记录、切分标点设置）
 ├── gui_styles.py        # 设计系统（颜色、字体、样式函数）
 ├── engine.py            # 翻译流程编排（分段、语言链、进度事件）
+├── milmmt.py            # MiLMMT-46 本地推理封装（官方固定提示词、语言名映射、输出清理）
+├── m2m100.py            # M2M-100 本地推理封装
 ├── hymt2.py             # Hy-MT2 本地推理封装（提示词、采样参数、输出清理）
-├── languages.py         # 语言白名单与 Hy-MT2 语言映射
+├── backend.py           # 按 architectures 路由到具体后端
+├── modelpath.py         # 模型目录探测与后端识别
+├── pathmirror.py        # 非 ASCII 路径下的分词器镜像
+├── langdata.py          # 各后端的语言表、分组与预设
+├── languages.py         # 语言白名单（随后端裁剪）
 ├── validators.py        # 输入校验与安全辅助（无 GUI/torch 依赖，可单测）
 ├── tests/               # pytest 用例
+├── milmmt_model/        # MiLMMT-46 本地模型文件（不入库）
+├── m2m100_model/        # M2M-100 本地模型文件（不入库）
 ├── hymt2_model/         # Hy-MT2 本地模型文件（不入库）
 ├── requirements.txt     # 运行依赖（已加版本区间）
 ├── LICENSE              # 代码许可（MIT）
@@ -160,18 +175,39 @@ grass/
 | 大语种 | 英语、法语、俄语、日语、西班牙语、德语、阿拉伯语 |
 | 亚洲 | 日语、韩语、泰语、越南语、印尼语、印地语、阿拉伯语 |
 | 欧洲 | 英语、法语、德语、西班牙语、俄语、意大利语、葡萄牙语 |
-| 民族语言 | 藏语、蒙古语、维吾尔语、哈萨克语 |
+| 华语变体（MiLMMT） | 中文、繁体中文、粤语 |
+| 中亚民族（MiLMMT/M2M-100） | 哈萨克语、乌兹别克语、阿塞拜疆语、土耳其语 |
+| 民族语言（Hy-MT2） | 藏语、蒙古语、维吾尔语、哈萨克语 |
 | 随机混合 | 从 5 个地区各随机抽 1 个语言 |
 
 ## 支持语言
 
-共 38 个语种/变体（与 Hy-MT2 官方语言表一致）：中文、繁体中文、粤语、日语、韩语、蒙古语、藏语、泰语、越南语、印尼语、马来语、菲律宾语、缅甸语、高棉语、印地语、孟加拉语、乌尔都语、泰米尔语、泰卢固语、马拉地语、古吉拉特语、阿拉伯语、希伯来语、波斯语、土耳其语、哈萨克语、维吾尔语、英语、法语、德语、西班牙语、葡萄牙语、意大利语、俄语、乌克兰语、波兰语、捷克语、荷兰语。详见 [languages.py](languages.py)。
+界面列表随当前后端变化，详见 [languages.py](languages.py) 与 [langdata.py](langdata.py)：
+
+- **MiLMMT-46（默认，46 个）**：中文、繁体中文、粤语、日语、韩语、泰语、越南语、印尼语、马来语、菲律宾语、缅甸语、高棉语、老挝语、印地语、孟加拉语、泰米尔语、乌尔都语、阿拉伯语、希伯来语、波斯语、土耳其语、哈萨克语、阿塞拜疆语、乌兹别克语、英语、法语、德语、西班牙语、葡萄牙语、意大利语、俄语、荷兰语、波兰语、捷克语、斯洛伐克语、斯洛文尼亚语、克罗地亚语、保加利亚语、罗马尼亚语、匈牙利语、希腊语、丹麦语、瑞典语、芬兰语、挪威语、加泰罗尼亚语
+- **M2M-100**：100 个语言代码，程序暴露 76 个常用（无繁体中文/粤语/藏语/维吾尔语）
+- **Hy-MT2**：38 个语种/变体（上面那套 + 蒙古语、藏语、维吾尔语、乌克兰语等）
 
 ## 许可
 
 - 本仓库代码：MIT，见 [LICENSE](LICENSE)。
-- 模型权重：**Apache-2.0**，由腾讯混元开源（`tencent/Hy-MT2-1.8B`）。商用与再分发请遵循模型卡与 Apache-2.0 条款，并保留出处。
-- 模型引用：
+- **默认模型权重**：`xiaomi-research/MiLMMT-46-1B-v1.0`，由小米 MiLM Plus 开源，遵循 **Gemma 许可**（基于 `google/gemma-3-1b-pt`）。商用与再分发请阅读模型卡与 Gemma 条款，并保留出处。
+- 可选模型：`facebook/m2m100_418M`（MIT）、`tencent/Hy-MT2-1.8B`（Apache-2.0）。
+- MiLMMT 模型引用：
+
+```bibtex
+@misc{han2026referencefreeposttrainingopenlarge,
+  title={Reference-Free Post-Training of Open Large Language Models for Multilingual Machine Translation},
+  author={Chris Han and Pengzhi Gao and Pei Fu and Jian Luan},
+  year={2026},
+  eprint={2608.10812},
+  archivePrefix={arXiv},
+  primaryClass={cs.CL},
+  url={https://arxiv.org/abs/2608.10812}
+}
+```
+
+- Hy-MT2 模型引用：
 
 ```bibtex
 @misc{zheng2026hymt2familyfastefficient,

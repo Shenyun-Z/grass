@@ -2,7 +2,8 @@
 """翻译引擎模块
 
 提供本地多语言中转翻译能力。后端由 backend.py 按模型架构路由：
-- m2m100.py：Meta M2M-100（默认，418M 编码器-解码器）
+- milmmt.py：小米 MiLMMT-46（默认，1B，Gemma3 解码器）
+- m2m100.py：Meta M2M-100（418M 编码器-解码器）
 - hymt2.py：腾讯混元 Hy-MT2（可选）
 本模块负责分段、语言链与流程编排。
 """
@@ -179,8 +180,8 @@ def classify_translate_error(exc: BaseException) -> str:
     msg = str(exc)
     lowered = msg.lower()
     if isinstance(exc, FileNotFoundError) or "不存在" in msg:
-        return ("模型文件缺失：请确认模型目录（默认 m2m100_model/ 或 hymt2_model/）"
-                "内有完整权重（或将 GRASS_MODEL_PATH 指向本地模型目录）。")
+        return ("模型文件缺失：请确认模型目录（默认 milmmt_model/、m2m100_model/ "
+                "或 hymt2_model/）内有完整权重（或将 GRASS_MODEL_PATH 指向本地模型目录）。")
     if isinstance(exc, ValueError) and ("不支持的语言" in msg or "语言代码" in msg):
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"
     if "out of memory" in lowered or "显存" in msg:

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""翻译后端路由：按模型目录里的 config.json 自动选择 Hy-MT2 或 M2M-100
+"""翻译后端路由：按模型目录里的 config.json 自动选择 MiLMMT-46 / Hy-MT2 / M2M-100
 
 两个后端都实现同一套接口：
     model_path() / model_label() / get_model(device)
@@ -19,18 +19,22 @@ class UnknownBackendError(RuntimeError):
 
 
 def kind() -> str:
-    """当前后端类型：hymt2 / m2m100"""
+    """当前后端类型：milmmt / hymt2 / m2m100"""
     detected = modelpath.kind()
-    if detected in ("hymt2", "m2m100"):
+    if detected in ("milmmt", "hymt2", "m2m100"):
         return detected
     raise UnknownBackendError(
-        f"无法识别模型架构：{modelpath.model_dir()}（只支持 Hy-MT2 与 M2M-100，"
+        f"无法识别模型架构：{modelpath.model_dir()}（只支持 MiLMMT-46、Hy-MT2 与 M2M-100，"
         "请检查 config.json 里的 architectures）")
 
 
 def module():
     """返回当前后端的实现模块"""
-    if kind() == "hymt2":
+    detected = kind()
+    if detected == "milmmt":
+        import milmmt
+        return milmmt
+    if detected == "hymt2":
         import hymt2
         return hymt2
     import m2m100

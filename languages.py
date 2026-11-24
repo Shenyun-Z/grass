@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """语言白名单（按当前后端自动切换）
 
-v1.7 起同时支持两种后端，语言集合随模型自动变化：
-- M2M100（默认）：78 个常用语种（无繁体中文 / 粤语 / 藏语 / 维吾尔语）
+v1.7 起同时支持三种后端，语言集合随模型自动变化：
+- MiLMMT-46（默认）：46 个语种（含繁体中文 / 粤语，无藏语 / 维吾尔语 / 蒙古语）
+- M2M100：78 个常用语种（无繁体中文 / 粤语 / 藏语 / 维吾尔语）
 - Hy-MT2：38 个语种/变体
 
 所有语言名都必须能在当前 LANG_MAP 中找到，否则配置加载与翻译调用都会被拒绝。
@@ -16,14 +17,15 @@ from langdata import (
     GROUPS_BY_BACKEND,
     HYMT2_ONLY_ALIASES,
     LANGS_BY_BACKEND,
+    MILMMT_ALIASES,
     PRESETS_BY_BACKEND,
 )
 
-DEFAULT_BACKEND = "m2m100"
+DEFAULT_BACKEND = "milmmt"
 
 
 def current_backend() -> str:
-    """当前生效的后端（按模型目录的 architectures 判断，识别失败退 M2M100）"""
+    """当前生效的后端（按模型目录的 architectures 判断，识别失败退 MiLMMT）"""
     try:
         detected = modelpath.kind()
     except Exception:
@@ -56,12 +58,14 @@ for _name, _langs in PRESETS_BY_BACKEND[_BACKEND].items():
 ALIASES = dict(COMMON_ALIASES)
 if _BACKEND == "hymt2":
     ALIASES.update(HYMT2_ONLY_ALIASES)
+elif _BACKEND == "milmmt":
+    ALIASES.update(MILMMT_ALIASES)
 
 _CODE_TO_NAME = {code.lower(): name for name, code in LANG_MAP.items()}
 
 
 def backend() -> str:
-    """当前后端类型（hymt2 / m2m100）"""
+    """当前后端类型（milmmt / hymt2 / m2m100）"""
     return _BACKEND
 
 

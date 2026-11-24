@@ -6,6 +6,8 @@ import os
 import pytest
 
 import backend
+import langdata
+import milmmt
 import m2m100
 import modelpath
 
@@ -102,3 +104,61 @@ def test_ascii_tokenizer_dir_mirrors_chinese_path(tmp_path):
     assert mirror.isascii()
     for name in m2m100.TOKENIZER_FILES:
         assert os.path.exists(os.path.join(mirror, name))
+
+
+# ===== MiLMMT-46（Gemma3 解码器后端）=====
+def test_detect_milmmt(tmp_path, monkeypatch):
+    _write_config(tmp_path, "Gemma3ForCausalLM")
+    monkeypatch.setenv("GRASS_MODEL_PATH", str(tmp_path))
+    modelpath.reset_cache()
+    assert modelpath.kind() == "milmmt"
+    assert backend.kind() == "milmmt"
+
+
+def test_milmmt_language_names_official():
+    # 提示词里的语言名必须和官方模型卡逐字一致
+    assert langdata.MILMMT_LANGS["中文"] == "Chinese (Simplified)"
+    assert langdata.MILMMT_LANGS["繁体中文"] == "Chinese (Traditional)"
+    assert langdata.MILMMT_LANGS["粤语"] == "Cantonese"
+    assert len(set(langdata.MILMMT_LANGS.values())) == 46
+    # 官方 46 语种里没有这些
+    for missing in ("藏语", "维吾尔语", "蒙古语", "乌克兰语"):
+        assert missing not in langdata.MILMMT_LANGS
+
+
+def test_milmmt_lang_name_lookup():
+    assert milmmt.lang_name("中文") == "Chinese (Simplified)"
+    assert milmmt.lang_name("chinese (simplified)") == "Chinese (Simplified)"
+    assert milmmt.lang_name("English") == "English"
+    assert milmmt.lang_name("藏语") is None
+
+
+def test_milmmt_prompt_format():
+    prompt = milmmt.build_prompt("我爱机器翻译", "中文", "英语")
+    assert prompt == ("Translate this from Chinese (Simplified) to English:\n"
+                      "Chinese (Simplified): 我爱机器翻译\n"
+                      "English:")
+    with pytest.raises(ValueError):
+        milmmt.build_prompt("文本", "中文", "藏语")
+
+
+def test_milmmt_clean_output():
+    assert milmmt.clean_output("  I love machine translation.\n\nHope it helps.") == \
+        "I love machine translation."
+    assert milmmt.clean_output("English: I love machine translation.") == \
+        "I love machine translation."
+    assert milmmt.clean_output("“我爱机器翻译”") == "我爱机器翻译"
+    assert milmmt.clean_output("") == ""
+
+
+def test_milmmt_tokenizer_dir_mirrors_chinese_path(tmp_path):
+    model_dir = tmp_path / "模型"
+    model_dir.mkdir()
+    for name in milmmt.TOKENIZER_FILES:
+        (model_dir / name).write_text("x", encoding="utf-8")
+    mirror = milmmt.tokenizer_dir(str(model_dir))
+    assert mirror != str(model_dir)
+    assert mirror.isascii()
+    for name in milmmt.TOKENIZER_FILES:
+        assert os.path.exists(os.path.join(mirror, name))
+    assert milmmt.tokenizer_dir(str(tmp_path)) == str(tmp_path)

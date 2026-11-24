@@ -5,8 +5,8 @@
 #
 # 产物：dist\生草机\ 目录（内含 生草机.exe 与 _internal\），
 #      以及 dist\grass-v<版本>-win64.zip。
-# 模型权重不入包：运行前把 m2m100_model\（或 hymt2_model\）放到 生草机.exe 同级目录，
-# 或用环境变量 GRASS_MODEL_PATH 指向模型目录。
+# 模型权重不入包：运行前把 milmmt_model\（默认，也可用 m2m100_model\ 或 hymt2_model\）
+# 放到 生草机.exe 同级目录，或用环境变量 GRASS_MODEL_PATH 指向模型目录。
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -26,6 +26,10 @@ python -m PyInstaller `
     --hidden-import "transformers.models.hunyuan_v1_dense" `
     --hidden-import "transformers.models.hunyuan_v1_dense.configuration_hunyuan_v1_dense" `
     --hidden-import "transformers.models.hunyuan_v1_dense.modeling_hunyuan_v1_dense" `
+    --hidden-import "transformers.models.gemma3" `
+    --hidden-import "transformers.models.gemma3.configuration_gemma3" `
+    --hidden-import "transformers.models.gemma3.modeling_gemma3" `
+    --hidden-import "transformers.models.gemma3.tokenization_gemma3" `
     --hidden-import "transformers.models.m2m_100" `
     --hidden-import "transformers.models.m2m_100.modeling_m2m_100" `
     --hidden-import "transformers.models.m2m_100.tokenization_m2m_100" `
