@@ -95,6 +95,7 @@ def transformers():
 # Windows 上 sentencepiece 的 C++ 实现打不开非 ASCII 路径，
 # 所以分词器小文件需要镜像到纯 ASCII 的临时目录再加载（权重仍从原目录读取）
 TOKENIZER_FILES = (
+    "config.json",          # AutoTokenizer 靠 architectures 决定用哪个分词器类
     "tokenizer_config.json",
     "special_tokens_map.json",
     "vocab.json",
@@ -172,8 +173,9 @@ def get_model(device: str) -> Tuple[object, object]:
                 load_kwargs = {"local_files_only": True}
                 if has_safetensors(_MODEL_PATH):
                     load_kwargs["use_safetensors"] = True
+                # use_fast=False：M2M-100 只有慢速分词器，转 fast 需要额外依赖，直接走 sentencepiece
                 tokenizer = AutoTokenizer.from_pretrained(
-                    ascii_tokenizer_dir(_MODEL_PATH), **load_kwargs)
+                    ascii_tokenizer_dir(_MODEL_PATH), use_fast=False, **load_kwargs)
                 dtype = _dtype(device)
                 try:
                     model = AutoModelForSeq2SeqLM.from_pretrained(
