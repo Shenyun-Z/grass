@@ -64,7 +64,9 @@ class SegmentModel(QAbstractListModel):
         self._segments = list(segments)
         self._results = {}
         self._states = {i: "waiting" for i in range(len(self._segments))}
-        self._revs = {}
+        # 每一行都打上新版本号，否则 delegate 的行高缓存会按旧内容复用，
+        # 长段落沿用短段落的单行高度，预览里就被裁成一行
+        self._revs = {i: self._rev for i in range(len(self._segments))}
         self._rev += 1
         self.endResetModel()
 
@@ -72,7 +74,7 @@ class SegmentModel(QAbstractListModel):
         self.beginResetModel()
         self._results = {}
         self._states = {i: "waiting" for i in range(len(self._segments))}
-        self._revs = {}
+        self._revs = {i: self._rev for i in range(len(self._segments))}
         self._rev += 1
         self.endResetModel()
 
@@ -152,8 +154,9 @@ class CompareModel(QAbstractListModel):
         self.beginResetModel()
         self._left = list(left)
         self._right = list(right)
-        self._revs = {}
         self._rev += 1
+        n = max(len(self._left), len(self._right))
+        self._revs = {i: self._rev for i in range(n)}
         self.endResetModel()
 
     def update_right(self, row: int, text: str) -> None:
@@ -171,8 +174,9 @@ class CompareModel(QAbstractListModel):
     def set_right(self, right: list[str]) -> None:
         self.beginResetModel()
         self._right = list(right)
-        self._revs = {}
         self._rev += 1
+        n = max(len(self._left), len(self._right))
+        self._revs = {i: self._rev for i in range(n)}
         self.endResetModel()
 
 
@@ -215,7 +219,9 @@ class CardDelegate(QStyledItemDelegate):
         return max(px(70), (width - px(10) - px(self.GAP)) // 2)
 
     def _text_width(self, col_width: int) -> int:
-        return max(px(40), col_width - px(self.PAD_X * 2) - px(self.NUM_W))
+        # 留 2px 余量：Qt 的换行测量与实际绘制在浮点宽度上会差一两个像素，
+        # 不留余量时恰好占满一行的文字会被裁掉最后一个字
+        return max(px(40), col_width - px(self.PAD_X * 2) - px(self.NUM_W) - px(2))
 
     def _wrap_height(self, text: str, text_width: int) -> int:
         if not text:

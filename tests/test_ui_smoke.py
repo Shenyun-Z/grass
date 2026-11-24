@@ -166,3 +166,34 @@ def test_lang_chips_not_clipped(qapp):
     # 方块必须全部落在宿主控件高度内（换行后的每一行都可见）
     assert max(bottoms) < host.height()
     pane.close()
+
+
+def test_row_height_cache_reacts_to_new_segments(qapp):
+    """换了一段更长的文字，行高必须重算，不能沿用上一段的单行高度"""
+    from grass_ui.splitview import CardDelegate, SegmentModel
+
+    model = SegmentModel()
+    delegate = CardDelegate("segment")
+    model.set_segments(["短句。"])
+    short_h = delegate.row_height(model.index(0, 0), 910)
+    long_text = "大华市场怒VR孵化园 拖一次nn热火胡儿，人 人发执偶尔我怕HR 和VR和" * 2
+    model.set_segments([long_text])
+    long_h = delegate.row_height(model.index(0, 0), 910)
+    assert long_h > short_h
+
+
+def test_strip_space_preview_is_read_only(qapp, monkeypatch, tmp_path):
+    """去空格显示的是处理后的预览，只读；切回原文恢复可编辑"""
+    monkeypatch.setenv("GRASS_SKIP_MODEL_LOAD", "1")
+    monkeypatch.setenv("GRASS_DATA_DIR", str(tmp_path))
+    from grass_ui.mainwindow import MainWindow
+
+    window = MainWindow()
+    try:
+        window._input_pane.set_text("第一行 有空格\n\n第二行")
+        window._on_view_mode("去空格")
+        assert window._input_pane._box.isReadOnly()
+        window._on_view_mode("原文")
+        assert not window._input_pane._box.isReadOnly()
+    finally:
+        window.close()

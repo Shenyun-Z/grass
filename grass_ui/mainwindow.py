@@ -189,6 +189,7 @@ class MainWindow(QMainWindow):
 
     def _on_view_mode(self, value: str) -> None:
         current = self._input_pane.text()
+        self._input_pane.set_preview_mode(value != "原文")
         if value == "去空格":
             if self._input_view == "原文":
                 self._raw_text = current
@@ -215,6 +216,7 @@ class MainWindow(QMainWindow):
             return
         self._raw_text = text
         self._input_pane.set_view_mode("原文")
+        self._input_pane.set_preview_mode(False)
         self._input_view = "原文"
         self._input_pane.set_text(text)
         self._on_input_change()
@@ -231,6 +233,7 @@ class MainWindow(QMainWindow):
             return
         self._raw_text = text
         self._input_pane.set_view_mode("原文")
+        self._input_pane.set_preview_mode(False)
         self._input_view = "原文"
         self._input_pane.set_text(text)
         self._on_input_change()

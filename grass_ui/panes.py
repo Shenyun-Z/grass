@@ -71,6 +71,8 @@ class InputPane(Card):
         super().__init__(parent)
         self._collapsed = False
         self._box_height = px(120)
+        self._enabled = True
+        self._preview = False
 
         header = QHBoxLayout()
         header.setSpacing(px(6))
@@ -143,11 +145,20 @@ class InputPane(Card):
         self._box_height = new_h
         self._box.setFixedHeight(new_h)
 
+    def set_preview_mode(self, preview: bool) -> None:
+        # 「去空格」显示的是程序处理过的结果，只读，避免改了却不生效的困惑
+        self._preview = preview
+        self._apply_read_only()
+
     def set_enabled_state(self, enabled: bool) -> None:
+        self._enabled = enabled
+        self._apply_read_only()
         self._mode.set_enabled(enabled)
-        self._box.setReadOnly(not enabled)
         for w in (self._load_btn, self._paste_btn):
             w.setEnabled(enabled)
+
+    def _apply_read_only(self) -> None:
+        self._box.setReadOnly(self._preview or not self._enabled)
 
 
 class ParamsPane(Card):
