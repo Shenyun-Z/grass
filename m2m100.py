@@ -40,6 +40,8 @@ _LANG_CODE = {name.lower(): code for name, code in langdata.M2M100_LANGS.items()
 # 清理译文外层的引号
 _QUOTE_PAIRS = {'"': '"', "“": "”", "'": "'", "「": "」", "『": "』", "«": "»"}
 _LABEL_RE = re.compile(r"^\s*(?:译文|翻译结果|翻译|译文如下)\s*[:：]\s*", re.I)
+# M2M-100 遇到词表外词会输出 <unk>，直接去掉而不是留在译文里
+_UNK_RE = re.compile(r"\s*<unk>\s*")
 
 
 def model_path() -> str:
@@ -161,6 +163,7 @@ def clean_output(text: str) -> str:
     if not out:
         return ""
     out = _LABEL_RE.sub("", out, count=1).strip()
+    out = _UNK_RE.sub(" ", out).strip()
     if len(out) >= 2 and out[0] in _QUOTE_PAIRS and out[-1] == _QUOTE_PAIRS[out[0]]:
         out = out[1:-1].strip()
     return out

@@ -71,6 +71,10 @@ def test_m2m100_rejects_unsupported_languages(name):
     assert m2m100.lang_code(name) is None
 
 
+def test_m2m100_clean_output_drops_unk_tokens():
+    assert m2m100.clean_output("快速的棕色<unk>子跳过了狗") == "快速的棕色 子跳过了狗"
+
+
 def test_m2m100_clean_output_strips_prefix_and_quotes():
     assert m2m100.clean_output("  译文：你好 ") == "你好"
     assert m2m100.clean_output('"你好"') == "你好"
