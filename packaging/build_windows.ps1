@@ -1,4 +1,4 @@
-# Windows 打包脚本：把 grass 打成不含模型权重的可执行程序
+﻿# Windows 打包脚本：把 grass 打成不含模型权重的可执行程序
 #
 # 用法（在装了 pyinstaller 的 conda 环境里）：
 #   powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
