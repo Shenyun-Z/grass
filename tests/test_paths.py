@@ -35,3 +35,12 @@ def test_model_path_default_is_sibling_of_base_dir(monkeypatch):
     monkeypatch.delenv("HYMT2_MODEL_PATH", raising=False)
     mod = importlib.reload(hymt2)
     assert mod.model_path() == os.path.join(mod.base_dir(), "hymt2_model")
+
+
+def test_fix_null_streams_noop_outside_frozen(monkeypatch):
+    import sys
+    import main
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    before = sys.stdout
+    main._fix_null_streams()
+    assert sys.stdout is before

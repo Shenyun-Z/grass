@@ -1006,6 +1006,9 @@ class App(ToastMixin, ColorAnimMixin, LangMixin, ConfigMixin, TranslateMixin, ct
                 _get_model()
             except Exception as e:
                 self._model_exc = e
+                # 打包版把 stderr 指向 grass.log，这里留个现场供事后排查
+                import traceback
+                traceback.print_exc()
 
         t = threading.Thread(target=load, daemon=True)
         t.start()
