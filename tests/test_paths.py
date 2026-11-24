@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """模型目录定位测试：源码运行用文件目录，PyInstaller 打包后用 exe 目录"""
+import importlib
 import os
 import sys
 
@@ -19,10 +20,18 @@ def test_base_dir_frozen_mode(monkeypatch):
 
 
 def test_model_path_env_wins(monkeypatch):
-    monkeypatch.setenv("HYMT2_MODEL_PATH", os.path.join("C:\\", "models", "hy-mt2"))
-    assert hymt2._MODEL_PATH == os.environ["HYMT2_MODEL_PATH"]
+    # _MODEL_PATH 在导入期解析，因此用 reload 模拟“启动前已设置环境变量”
+    target = os.path.join("C:\\", "models", "hy-mt2")
+    monkeypatch.setenv("HYMT2_MODEL_PATH", target)
+    try:
+        mod = importlib.reload(hymt2)
+        assert mod.model_path() == target
+    finally:
+        monkeypatch.delenv("HYMT2_MODEL_PATH", raising=False)
+        importlib.reload(hymt2)
 
 
-def test_model_path_default_is_sibling_of_base_dir():
-    assert hymt2._MODEL_PATH == os.environ.get("HYMT2_MODEL_PATH") or \
-        hymt2._MODEL_PATH == os.path.join(hymt2.base_dir(), "hymt2_model")
+def test_model_path_default_is_sibling_of_base_dir(monkeypatch):
+    monkeypatch.delenv("HYMT2_MODEL_PATH", raising=False)
+    mod = importlib.reload(hymt2)
+    assert mod.model_path() == os.path.join(mod.base_dir(), "hymt2_model")
