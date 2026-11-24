@@ -12,9 +12,12 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$version = (& python -c "from version import __version__; print(__version__)").Trim()
+# 用哪个 Python：默认 PATH 里的 python，可用 GRASS_PYTHON 指定（例如 conda 环境的解释器）
+$py = if ($env:GRASS_PYTHON) { $env:GRASS_PYTHON } else { 'python' }
 
-python -m PyInstaller `
+$version = (& $py -c "from version import __version__; print(__version__)").Trim()
+
+& $py -m PyInstaller `
     --noconfirm --clean --windowed --onedir `
     --name "生草机" `
     --paths "$root" `
