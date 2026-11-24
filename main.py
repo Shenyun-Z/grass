@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""程序入口：-​-version 支持、打包版日志重定向、启动 Qt 界面"""
 import os
 import sys
 
@@ -25,17 +26,17 @@ def _fix_null_streams() -> None:
             setattr(sys, name, stream)
 
 
-if __name__ == "__main__":
+def main() -> int:
     if "--version" in sys.argv:
         print(f"grass v{__version__}")
-        sys.exit(0)
+        return 0
 
     _fix_null_streams()
 
-    from dnd import enable_dnd, make_app
-    from gui import App
+    from grass_ui.app import run
 
-    app = make_app(App)()
-    # 拖放是增强功能：不可用时静默降级，绝不因它崩溃
-    enable_dnd(app, getattr(app, "_on_drop", None))
-    app.mainloop()
+    return run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
