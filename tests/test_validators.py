@@ -55,6 +55,12 @@ def test_read_text_file_gbk_fallback(tmp_path):
     assert v.read_text_file(str(p)) == "生草机"
 
 
+def test_read_text_file_normalizes_newlines(tmp_path):
+    p = tmp_path / "d.txt"
+    p.write_bytes("第一行\r\n第二行\r第三行".encode("utf-8"))
+    assert v.read_text_file(str(p)) == "第一行\n第二行\n第三行"
+
+
 def test_read_text_file_rejects_oversize(tmp_path):
     p = tmp_path / "c.txt"
     p.write_bytes(b"x" * 20)

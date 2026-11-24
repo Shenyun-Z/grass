@@ -100,7 +100,7 @@ class _StubTokenizer:
     def encode(self, text, add_special_tokens=False):
         return list(range(len(text)))
 
-    def decode(self, ids, skip_special_tokens=True):
+    def decode(self, ids, skip_special_tokens=True, **kwargs):
         return "-" * len(ids)
 
 

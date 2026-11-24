@@ -81,9 +81,11 @@ def read_text_file(path, max_bytes=MAX_INPUT_BYTES):
         raw = f.read()
     for encoding in ("utf-8-sig", "gbk"):
         try:
-            return raw.decode(encoding)
+            text = raw.decode(encoding)
         except UnicodeDecodeError:
             continue
+        # 统一换行：Windows 文本常带 CRLF，直接返回会让分段/导出在跨平台时不一致
+        return text.replace("\r\n", "\n").replace("\r", "\n")
     raise ValueError("无法识别文件编码（仅支持 UTF-8 / GBK 文本）")
 
 

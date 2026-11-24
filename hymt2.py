@@ -76,6 +76,16 @@ def transformers():
     return _TRANSFORMERS
 
 
+def _quiet_transformers() -> None:
+    """降低 transformers 的控制台噪声：GUI 用户不该被权重加载进度条刷屏"""
+    try:
+        import transformers as _tf
+        _tf.utils.logging.set_verbosity_error()
+        _tf.utils.logging.disable_progress_bar()
+    except Exception:
+        pass
+
+
 def has_safetensors(model_dir: str) -> bool:
     """模型目录内是否存在 safetensors 权重（优先使用，避免 pickle 反序列化风险）"""
     try:
@@ -110,6 +120,7 @@ def get_model(device: str) -> Tuple[object, object]:
             if _MODEL is None:
                 if not os.path.exists(_MODEL_PATH):
                     raise FileNotFoundError(f"模型路径不存在: {_MODEL_PATH}")
+                _quiet_transformers()
                 AutoTokenizer, AutoModelForCausalLM = transformers()
                 trust = _trust_remote_code()
                 load_kwargs = {"local_files_only": True, "trust_remote_code": trust}
@@ -159,7 +170,8 @@ def truncate_to_max_len(text: str, tokenizer, max_len: int = MAX_INPUT_TOKENS) -
         if len(ids) <= max_len:
             return text
         truncated_ids = ids[:max_len]
-        return tokenizer.decode(truncated_ids, skip_special_tokens=True).strip()
+        return tokenizer.decode(truncated_ids, skip_special_tokens=True,
+                                clean_up_tokenization_spaces=False).strip()
     except Exception:
         # tokenize 失败时退化为字符级截断，保证不产生超长输入
         return text[:max_len]
@@ -196,7 +208,8 @@ def translate(text: str, target_lang: str, device: str) -> str:
     with torch().no_grad():
         outputs = model.generate(**inputs, **generate_kwargs)
     new_tokens = outputs[0][prompt_tokens:]
-    decoded = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    decoded = tokenizer.decode(new_tokens, skip_special_tokens=True,
+                               clean_up_tokenization_spaces=False)
     return clean_output(decoded)
 
 
