@@ -154,7 +154,7 @@ def classify_translate_error(exc: BaseException) -> str:
     msg = str(exc)
     lowered = msg.lower()
     if isinstance(exc, FileNotFoundError) or "不存在" in msg:
-        return ("模型文件缺失：请确认 ./hymt2_model/ 目录内是完整的 Hy-MT2 模型"
+        return ("模型文件缺失：请确认程序目录下的 hymt2_model/ 内是完整的 Hy-MT2 模型"
                 "（或将 HYMT2_MODEL_PATH 指向本地模型目录）。")
     if isinstance(exc, ValueError) and ("不支持的语言" in msg or "语言代码" in msg):
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"

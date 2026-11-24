@@ -1,0 +1,56 @@
+生草机 · 模型文件下载说明
+=================================
+
+本程序不包含模型权重。首次使用前，请把模型文件放到正确位置。
+
+一、放置位置（二选一）
+
+1) 默认：在“生草机.exe”所在目录下建一个文件夹，名称必须正好是：
+
+       hymt2_model      （即与 exe 同级：…\生草机\hymt2_model\）
+
+2) 或用环境变量指定（放在任意位置都行）：
+
+       set HYMT2_MODEL_PATH=D:\models\hymt2_model
+
+   想验证是否生效：命令行执行  生草机.exe --version  后启动，界面标题会显示当前模型目录。
+
+二、下载方法
+
+模型仓库：ModelScope  Tencent-Hunyuan/Hy-MT2-1.8B（Apache-2.0，约 3.9GB）
+
+方法 A：用 modelscope 命令行（推荐，国内直连）
+
+    pip install modelscope
+    modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model
+
+方法 B：直接下载单个文件（curl 自带于 Windows 10+）
+
+    cd 生草机
+    mkdir hymt2_model
+    curl -L -o hymt2_model\config.json        https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/config.json
+    curl -L -o hymt2_model\generation_config.json https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/generation_config.json
+    curl -L -o hymt2_model\tokenizer_config.json   https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/tokenizer_config.json
+    curl -L -o hymt2_model\tokenizer.json     https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/tokenizer.json
+    curl -L -o hymt2_model\chat_template.jinja https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/chat_template.jinja
+    curl -L -C - -o hymt2_model\model.safetensors https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/model.safetensors
+
+三、检查清单
+
+hymt2_model\ 里应当至少有这几个文件：
+
+    config.json           （architectures = HunYuanDenseV1ForCausalLM）
+    model.safetensors     （约 3888 MB，最大的那个）
+    tokenizer.json / tokenizer_config.json
+    chat_template.jinja
+    generation_config.json
+
+四、常见问题
+
+- 启动后提示“模型文件缺失”：目录名不是 hymt2_model，或模型没下完整（尤其 model.safetensors 没下完）
+- 首次加载慢（CPU 上 30 秒到数分钟都属正常），加载完成后标题栏不再显示“加载模型中”
+- 记忆体（内存）需求：CPU 推理约 8–9GB 可用内存
+- 下载模型不需要翻墙；程序运行不需要联网（local_files_only 加载）
+- 想换更大模型（Hy-MT2-7B / 30B-A3B）：目录名同样放 hymt2_model，或用 HYMT2_MODEL_PATH 指向它；显存/内存需求相应提高
+
+模型许可 Apache-2.0，可商用；程序代码 MIT。

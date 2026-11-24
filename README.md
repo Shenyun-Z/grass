@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v1.5**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.6**（`python main.py --version` 可查看）。
 
 ## 原理
 
@@ -37,6 +37,17 @@ set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 >
 > **CPU 实测参考**（Ryzen 9 7950X / 32 线程 / 无 GPU / float32）：模型加载约 31 秒；单句翻译 3–7 秒；
 > 一段 3 轮中转（4 次调用）约 36 秒。按此推算，10 段 × 7 轮的中等任务在 CPU 上需要十分钟量级。
+
+## Windows 免安装版（exe）
+
+Release 里附带 `grass-v1.6-win64.zip`，解压后双击 `生草机.exe` 即可运行，**不需要装 Python**。
+
+- 包里**不含模型权重**（约 3.9GB）。首次运行前把 `hymt2_model\` 放到 `生草机.exe` 同级目录，
+  或用 `HYMT2_MODEL_PATH` 指向模型目录；详细步骤见包内 `模型下载说明.txt`
+- 下载：`modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model`
+- 默认 CPU 推理（构建的 exe 不带 CUDA 运行库）；有显卡想用 GPU 的走源码安装路径
+- 自己打包：`powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
+  （需先 `pip install pyinstaller`，产物在 `dist\`）
 
 ## 用法
 

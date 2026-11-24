@@ -8,6 +8,7 @@ configs/
 .eggs/
 dist/
 build/
+*.spec
 .vscode/
 .idea/
 

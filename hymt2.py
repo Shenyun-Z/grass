@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
 from typing import Optional, Tuple
 
@@ -27,8 +28,14 @@ REPETITION_PENALTY = 1.05
 MAX_INPUT_TOKENS = 2048
 MAX_NEW_TOKENS = 1024
 
-_MODEL_PATH = os.environ.get("HYMT2_MODEL_PATH") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "hymt2_model")
+def base_dir() -> str:
+    """程序所在目录：源码运行时是本文件目录，PyInstaller 打包后是 exe 所在目录"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+_MODEL_PATH = os.environ.get("HYMT2_MODEL_PATH") or os.path.join(base_dir(), "hymt2_model")
 
 _MODEL = None
 _TOKENIZER = None
