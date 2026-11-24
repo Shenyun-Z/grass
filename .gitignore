@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 nllb_model/
+hymt2_model/
 configs/
 *.egg-info/
 .eggs/

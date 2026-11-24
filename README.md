@@ -1,6 +1,6 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v1.4**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v1.5**（`python main.py --version` 可查看）。
 
 ## 原理
 
@@ -14,22 +14,26 @@ conda activate grass
 pip install -r requirements.txt
 ```
 
-模型文件放置于 `./nllb_model/`（NLLB-200-600M）。
+模型为 **腾讯混元 Hy-MT2-1.8B**（Apache-2.0），本地部署，放于 `./hymt2_model/`。
+从 Hugging Face / ModelScope 下载 `tencent/Hy-MT2-1.8B`（或 7B / 30B-A3B、FP8、GGUF 版本）后，把整个模型目录放进 `hymt2_model/` 即可。
 
 > **安全提示**：模型目录的 `config.json` 由 `transformers` 解析，请只使用可信来源的模型；
 > 目录内若存在 `*.safetensors` 权重，程序会强制优先使用，避免 pickle 反序列化带来的代码执行风险。
+> 默认**不**开启 `trust_remote_code`；确认为可信来源且模型确实需要时，才设置 `GRASS_HYMT2_TRUST_REMOTE_CODE=1`。
 
-**自定义模型路径**：设置环境变量 `NLLB_MODEL_PATH` 可指定模型位置，例如：
+**自定义模型路径**：设置环境变量 `HYMT2_MODEL_PATH` 可指定模型位置，例如：
 ```bash
-set NLLB_MODEL_PATH=D:\models\nllb_model   # Windows
-export NLLB_MODEL_PATH=/path/to/nllb_model  # Linux/macOS
+set HYMT2_MODEL_PATH=D:\models\hymt2_model   # Windows
+export HYMT2_MODEL_PATH=/path/to/hymt2_model  # Linux/macOS
 ```
 
-**设备加速**：程序会自动检测 CUDA，检测到 NVIDIA 显卡时模型自动切换到 GPU 并以半精度（half）推理，显著降低显存占用、提升速度；每段翻译后自动释放显存缓存，避免连续翻译时显存累积。也可用 `GRASS_DEVICE` 环境变量强制指定设备：
+**设备与精度**：程序自动检测 CUDA，有显卡时用 GPU + bfloat16（不支持时退 float16）推理，CPU 则用 float32；每段翻译后自动释放显存缓存。也可用 `GRASS_DEVICE` 强制指定：
 ```bash
 set GRASS_DEVICE=cpu    # 强制使用 CPU
 set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 ```
+
+> 提示：1.8B 模型在 CPU 上逐句推理较慢（生草流程一次要跑几十上百次翻译），建议优先使用 GPU。
 
 ## 用法
 
@@ -62,7 +66,7 @@ python main.py
 |------|------|
 | 固定 | 按设定的中转语言序列依次翻译 |
 | 低强度 | 每轮从大语种中随机选择一种语言翻译 |
-| 高强度 | 每轮从全部 200+ 种语言中随机选择一种翻译 |
+| 高强度 | 每轮从全部 38 个语种中随机选择一种翻译 |
 
 随机模式下可点击"排除语言..."按钮，勾选不想参与随机的语言（如英语翻译太准确，排除后生草效果更显著）。
 
@@ -80,11 +84,11 @@ python main.py
 
 ```bash
 pip install -r requirements-dev.txt
-pytest            # 60 个用例，覆盖分段、语言链、配置名校验、历史记录规整、文件读取与导出转义
+pytest            # 83 个用例，覆盖分段、语言链、提示词与输出清理、语言表一致性、配置名校验、历史记录规整、文件读取与导出转义
 ```
 
-测试不需要模型权重与 GPU：`engine.py` 的 `torch` / `transformers` 为惰性导入，逻辑层测试通过
-`monkeypatch` 替换 `translate_batch`，模型缺失不会影响 GUI 启动（界面会给出缺失依赖提示）。
+测试不需要模型权重与 GPU：`hymt2.py` 的 `torch` / `transformers` 为惰性导入，逻辑层测试通过
+`monkeypatch` 替换 `translate_batch`，模型缺失不会影响 GUI 启动（界面会给出缺失提示）。
 
 ## 项目结构
 
@@ -101,12 +105,14 @@ grass/
 ├── gui_translate.py     # 翻译控制 Mixin（启动、停止、消息轮询）
 ├── gui_dialogs.py       # 弹窗（语言选择、排除语言、预设、翻译过程详情、历史记录、切分标点设置）
 ├── gui_styles.py        # 设计系统（颜色、字体、样式函数）
-├── engine.py            # 翻译引擎
-├── languages.py         # 语言定义与映射
+├── engine.py            # 翻译流程编排（分段、语言链、进度事件）
+├── hymt2.py             # Hy-MT2 本地推理封装（提示词、采样参数、输出清理）
+├── languages.py         # 语言白名单与 Hy-MT2 语言映射
 ├── validators.py        # 输入校验与安全辅助（无 GUI/torch 依赖，可单测）
 ├── tests/               # pytest 用例
-├── nllb_model/          # NLLB-200-600M 模型文件
+├── hymt2_model/         # Hy-MT2 本地模型文件（不入库）
 ├── requirements.txt     # 运行依赖（已加版本区间）
+├── LICENSE              # 代码许可（MIT）
 └── configs/             # 用户保存的配置文件
 ```
 
@@ -119,9 +125,26 @@ grass/
 | 大语种 | 英语、法语、俄语、日语、西班牙语、德语、阿拉伯语 |
 | 亚洲 | 日语、韩语、泰语、越南语、印尼语、印地语、阿拉伯语 |
 | 欧洲 | 英语、法语、德语、西班牙语、俄语、意大利语、葡萄牙语 |
-| 非洲 | 斯瓦希里语、豪萨语、约鲁巴语、阿姆哈拉语、祖鲁语、科萨语、索马里语 |
-| 随机混合 | 从 11 个地区各随机抽 1 个语言 |
+| 民族语言 | 藏语、蒙古语、维吾尔语、哈萨克语 |
+| 随机混合 | 从 5 个地区各随机抽 1 个语言 |
 
 ## 支持语言
 
-支持 200+ 种语言，涵盖东亚、东南亚、南亚、中东/中亚、欧洲（日耳曼/罗曼/斯拉夫/波罗的海/其他）、非洲等地区语言。详见 [languages.py](languages.py)。
+共 38 个语种/变体（与 Hy-MT2 官方语言表一致）：中文、繁体中文、粤语、日语、韩语、蒙古语、藏语、泰语、越南语、印尼语、马来语、菲律宾语、缅甸语、高棉语、印地语、孟加拉语、乌尔都语、泰米尔语、泰卢固语、马拉地语、古吉拉特语、阿拉伯语、希伯来语、波斯语、土耳其语、哈萨克语、维吾尔语、英语、法语、德语、西班牙语、葡萄牙语、意大利语、俄语、乌克兰语、波兰语、捷克语、荷兰语。详见 [languages.py](languages.py)。
+
+## 许可
+
+- 本仓库代码：MIT，见 [LICENSE](LICENSE)。
+- 模型权重：**Apache-2.0**，由腾讯混元开源（`tencent/Hy-MT2-1.8B`）。商用与再分发请遵循模型卡与 Apache-2.0 条款，并保留出处。
+- 模型引用：
+
+```bibtex
+@misc{zheng2026hymt2familyfastefficient,
+  title={Hy-MT2: A Family of Fast, Efficient and Powerful Multilingual Translation Models in the Wild},
+  author={Mao Zheng and Zheng Li and Tao Chen and Bo Lv and Mingrui Sun and Mingyang Song and Jinlong Song and Hong Huang and Decheng Wu and Hai Wang and Yifan Song and Yanfeng Chen and Guanwei Zhang},
+  year={2026},
+  eprint={2605.22064},
+  archivePrefix={arXiv},
+  primaryClass={cs.CL}
+}
+```
