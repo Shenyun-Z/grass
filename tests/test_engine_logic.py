@@ -118,22 +118,18 @@ def test_has_safetensors(tmp_path):
 
 
 def test_resolve_language():
-    from languages import resolve, backend
+    from languages import resolve
     assert resolve("中") == "中文"
     assert resolve("英语") == "英语"
     assert resolve("不存在的语言") is None
-    if backend() == "hymt2":
-        assert resolve("zh-Hant") == "繁体中文"
-        assert resolve("中文（繁体）") == "繁体中文"
-    else:
-        # M2M-100 没有繁体中文
-        assert resolve("zh-Hant") is None
+    assert resolve("中文（繁体）") == "繁体中文"
+    assert resolve("藏语") is None
 
 
 # ===== 错误分类 =====
 @pytest.mark.parametrize("exc,fragment", [
     (ImportError("缺少依赖 torch"), "依赖缺失"),
-    (FileNotFoundError("模型路径不存在: ./hymt2_model"), "模型文件缺失"),
+    (FileNotFoundError("模型路径不存在: ./milmmt_model"), "模型文件缺失"),
     (RuntimeError("CUDA out of memory"), "显存不足"),
     (ValueError("不支持的语言: xx -> yy"), "语言配置非法"),
 ])

@@ -1,23 +1,19 @@
-生草机 · 模型文件下载说明（v2.0）
+生草机 · 模型文件下载说明（v2.1）
 =================================
 
-本程序不包含模型权重。首次使用前，请下载模型并放到正确位置。
-程序按模型目录里 config.json 的 architectures 自动识别后端，三种模型任选其一：
+本程序只支持小米 MiLMMT-46-1B-v1.0 一个模型，且不包含模型权重。
+首次使用前，请下载模型并放到正确位置。
 
-    ① MiLMMT-46-1B   （默认，约 2.0GB，Gemma 许可）  architectures: Gemma3ForCausalLM
-    ② M2M-100-418M   （可选，约 1.9GB，MIT）         architectures: M2M100ForConditionalGeneration
-    ③ Hy-MT2-1.8B    （可选，约 3.9GB，Apache-2.0）  architectures: HunYuanDenseV1ForCausalLM
+    MiLMMT-46-1B（约 2.0GB，Gemma 许可）
+    architectures: Gemma3ForCausalLM
 
 一、放置位置
 
-1) 默认：在“生草机.exe”所在目录下建文件夹，名称分别为：
+1) 默认：在 grass.exe 所在目录下建文件夹 milmmt_model：
 
-       milmmt_model        （MiLMMT-46，默认推荐）
-       m2m100_model        （M2M-100）
-       hymt2_model         （Hy-MT2）
+       …\grass\milmmt_model\config.json
 
-   即：…\生草机\milmmt_model\config.json 这样能找到。
-   程序目录放在中文路径下也能正常运行。
+   程序目录放在中文路径下也能正常运行（但可执行文件名请保持 ASCII）。
 
 2) 或用环境变量指向任意位置：
 
@@ -29,18 +25,10 @@
 
     pip install modelscope
 
-    :: 默认后端 MiLMMT-46-1B（约 2.0GB）
     modelscope download --model xiaomi-research/MiLMMT-46-1B-v1.0 --local_dir .\milmmt_model
-
-    :: 可选后端 M2M-100-418M（约 1.9GB）
-    modelscope download --model facebook/m2m100_418M --local_dir .\m2m100_model
-
-    :: 可选后端 Hy-MT2-1.8B（约 3.9GB）
-    modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model
 
 方法 B：逐文件 curl（Windows 10+ 自带）
 
-    :: MiLMMT-46-1B（默认）
     mkdir milmmt_model
     curl -L -o milmmt_model\config.json             https://modelscope.cn/models/xiaomi-research/MiLMMT-46-1B-v1.0/resolve/master/config.json
     curl -L -o milmmt_model\generation_config.json  https://modelscope.cn/models/xiaomi-research/MiLMMT-46-1B-v1.0/resolve/master/generation_config.json
@@ -53,24 +41,6 @@
     curl -L -o milmmt_model\tokenizer.model         https://modelscope.cn/models/xiaomi-research/MiLMMT-46-1B-v1.0/resolve/master/tokenizer.model
     curl -L -C - -o milmmt_model\model.safetensors  https://modelscope.cn/models/xiaomi-research/MiLMMT-46-1B-v1.0/resolve/master/model.safetensors
 
-    :: M2M-100（需要时）
-    mkdir m2m100_model
-    curl -L -o m2m100_model\config.json               https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/config.json
-    curl -L -o m2m100_model\generation_config.json    https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/generation_config.json
-    curl -L -o m2m100_model\tokenizer_config.json     https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/tokenizer_config.json
-    curl -L -o m2m100_model\special_tokens_map.json   https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/special_tokens_map.json
-    curl -L -o m2m100_model\vocab.json                https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/vocab.json
-    curl -L -o m2m100_model\sentencepiece.bpe.model   https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/sentencepiece.bpe.model
-    curl -L -C - -o m2m100_model\pytorch_model.bin    https://modelscope.cn/models/facebook/m2m100_418M/resolve/master/pytorch_model.bin
-
-    :: Hy-MT2（需要时）
-    mkdir hymt2_model
-    curl -L -o hymt2_model\config.json          https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/config.json
-    curl -L -o hymt2_model\tokenizer_config.json https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/tokenizer_config.json
-    curl -L -o hymt2_model\tokenizer.json        https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/tokenizer.json
-    curl -L -o hymt2_model\chat_template.jinja   https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/chat_template.jinja
-    curl -L -C - -o hymt2_model\model.safetensors https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT2-1.8B/resolve/master/model.safetensors
-
 三、检查清单
 
     milmmt_model\ 至少需要：
@@ -78,27 +48,19 @@
         model.safetensors（约 2000MB）
         tokenizer.json（约 33MB）/ tokenizer_config.json / special_tokens_map.json / added_tokens.json
 
-    m2m100_model\ 至少需要：
-        config.json（architectures 含 M2M100ForConditionalGeneration）
-        model.safetensors 或 pytorch_model.bin（约 1.9GB）
-        sentencepiece.bpe.model / vocab.json / special_tokens_map.json / tokenizer_config.json
-
-    hymt2_model\ 至少需要：
-        config.json（architectures = HunYuanDenseV1ForCausalLM）
-        model.safetensors（约 3888MB）
-        tokenizer.json / tokenizer_config.json / chat_template.jinja
-
 四、常见问题
 
 - 提示“模型文件缺失”：目录名不对，或权重没下完整（重点看最大的那个文件）
-- 提示“无法识别模型架构”：config.json 里的 architectures 既不是 Gemma3ForCausalLM，也不是 M2M100 / HunYuan，可能下错了仓库
-- MiLMMT-46 支持 46 个语种，有繁体中文、粤语，但没有藏语、维吾尔语、蒙古语；界面上不会列出这些
-- MiLMMT-46 必须显式指定源语言（模型没有自动识别模式），程序已按官方格式拼提示词，不要自己改
-- 首次加载：MiLMMT-46 约 3 秒，M2M-100 约 6 秒，Hy-MT2 需要几十秒到数分钟（CPU）
-- 单句推理（CPU）：MiLMMT-46 约 3–4 秒，M2M-100 约 1 秒，Hy-MT2 约 3–7 秒
-- 内存需求：MiLMMT-46 约 5GB，M2M-100 约 3GB，Hy-MT2 约 8–9GB
+- 提示“模型配置异常”：config.json 里的 architectures 不是 Gemma3ForCausalLM，可能下错了仓库
+- 支持 46 个语种，有繁体中文、粤语，但没有藏语、维吾尔语、蒙古语；界面上不会列出这些
+- 必须显式指定源语言（模型没有自动识别模式），程序已按官方格式拼提示词，不要自己改
+- 首次加载约 3 秒（CPU），单句推理约 3–4 秒，内存约需 5GB
 - 下载模型不需要翻墙；程序运行完全离线（local_files_only）
-- 想换成别的模型：只要 architectures 属于上面三类，放到目录里就会被自动识别
 
-许可：程序代码 MIT；MiLMMT-46 遵循 Gemma 许可（基于 google/gemma-3-1b-pt）；
-M2M-100 为 MIT；Hy-MT2 为 Apache-2.0。
+五、可执行文件名
+
+    请保持 grass.exe 这个名字（纯 ASCII）。v2.0 的“生草机.exe”在部分 Windows 11
+    机器上会在创建窗口时直接退出（事件日志 0xC0000409 / ucrtbase.dll），
+    改成 ASCII 文件名即可正常启动；窗口标题仍然是“生草机”。
+
+许可：程序代码 MIT；MiLMMT-46 遵循 Gemma 许可（基于 google/gemma-3-1b-pt）。

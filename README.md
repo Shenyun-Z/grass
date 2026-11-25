@@ -1,7 +1,9 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v2.0**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v2.1**（`python main.py --version` 可查看）。
 
+> **v2.1：只支持小米 MiLMMT-46 一个模型**，M2M-100 与 Hy-MT2 的后端代码、语言表、预设与打包项全部移除，代码更短、启动路径更简单。
+>
 > **v2.0 起界面用 PySide6（Qt）完全重写**：分块预览与对照视图改成虚拟化列表，拖动窗口、滚动、流式出结果都不再重排整棵控件树；并新增 Ctrl+滚轮调字号。
 
 ## 原理
@@ -16,41 +18,29 @@ conda activate grass
 pip install -r requirements.txt
 ```
 
-模型本地部署，**按模型目录里 `config.json` 的 `architectures` 自动识别后端**，三种都支持：
+模型本地部署，只支持一个模型：
 
-| 后端 | 默认目录 | 参数 | 语种 | 许可 | 说明 |
-|---|---|---|---|---|---|
-| **MiLMMT-46**（默认，v1.7 起） | `milmmt_model/` | 1B | 46（含繁体中文/粤语，无藏/维/蒙） | Gemma | 质量明显高于 M2M、低于 Hy-MT2，翻译稳定不吐占位符 |
-| M2M-100 | `m2m100_model/` | 418M | 100（本程序暴露 76 个常用） | MIT | "直译味"最重、生草最狠，CPU 最快，但会丢词 |
-| Hy-MT2 | `hymt2_model/` | 1.8B | 38（含繁体/粤语/藏/维） | Apache-2.0 | 质量太高，几乎不生草；适合要"准确"的场景 |
+| 模型 | 默认目录 | 参数 | 语种 | 许可 |
+|---|---|---|---|---|
+| **MiLMMT-46-1B** | `milmmt_model/` | 1B | 46（含繁体中文/粤语，无藏/维/蒙） | Gemma |
 
 下载（ModelScope，国内直连）：
 
 ```bash
 pip install modelscope
-
-# 默认后端 MiLMMT-46-1B（约 2.0GB）
 modelscope download --model xiaomi-research/MiLMMT-46-1B-v1.0 --local_dir .\milmmt_model
-
-# 可选后端 M2M-100（约 1.9GB）
-modelscope download --model facebook/m2m100_418M --local_dir .\m2m100_model
-
-# 可选后端 Hy-MT2（约 3.9GB）
-modelscope download --model Tencent-Hunyuan/Hy-MT2-1.8B --local_dir .\hymt2_model
 ```
-
-语言列表会跟着后端变：MiLMMT-46 有繁体中文、粤语，但没有藏语、维吾尔语、蒙古语；M2M-100 连繁体中文和粤语也没有。选不支持的语言会在翻译时被拒绝（界面列表里也不会出现）。
 
 > MiLMMT-46 的指令跟随能力在后训练阶段被大幅削弱，官方要求用固定提示词并显式写出源语言（没有自动识别模式）。程序已按官方格式拼 `Translate this from <源语言> to <目标语言>:`，并给语言名做了官方的英文名映射，不要自己改提示词。
 
 > **安全提示**：模型目录的 `config.json` 由 `transformers` 解析，请只使用可信来源的模型；
 > 目录内若存在 `*.safetensors` 权重，程序会强制优先使用，避免 pickle 反序列化带来的代码执行风险。
-> 默认**不**开启 `trust_remote_code`；确认为可信来源且模型确实需要时，才设置 `GRASS_HYMT2_TRUST_REMOTE_CODE=1`。
+> 程序不开启 `trust_remote_code`。
 
-**自定义模型路径**：设置环境变量 `GRASS_MODEL_PATH`（旧写法 `HYMT2_MODEL_PATH` 继续兼容）可指定模型位置，例如：
+**自定义模型路径**：设置环境变量 `GRASS_MODEL_PATH` 可指定模型位置，例如：
 ```bash
-set GRASS_MODEL_PATH=D:\models\m2m100_model    # Windows
-export GRASS_MODEL_PATH=/path/to/m2m100_model  # Linux/macOS
+set GRASS_MODEL_PATH=D:\models\milmmt_model    # Windows
+export GRASS_MODEL_PATH=/path/to/milmmt_model  # Linux/macOS
 ```
 
 **设备与精度**：程序自动检测 CUDA，有显卡时用 GPU + bfloat16（不支持时退 float16）推理，CPU 则用 float32；每段翻译后自动释放显存缓存。也可用 `GRASS_DEVICE` 强制指定：
@@ -59,23 +49,23 @@ set GRASS_DEVICE=cpu    # 强制使用 CPU
 set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 ```
 
-> 提示：MiLMMT-46 是解码器模型，逐 token 生成，CPU 上比 M2M-100 慢；生草流程一次要跑几十上百次翻译，段落多时会明显等。
+> 提示：MiLMMT-46 是解码器模型，逐 token 生成，CPU 上较慢；生草流程一次要跑几十上百次翻译，段落多时会明显等。
 >
 > **CPU 实测参考**（Ryzen 9 7950X / 32 线程 / 无 GPU / float32）：
-> MiLMMT-46-1B 加载约 3 秒、单句 2.8–4.3 秒、3 轮中转约 14 秒、5 轮约 22 秒；
-> M2M-100-418M 加载约 6.5 秒、单句 0.9–1.2 秒、2 段 × 5 轮（12 次调用）约 11 秒；
-> Hy-MT2-1.8B 加载 31–46 秒、单句 3–7 秒、一段 3 轮中转约 36 秒。
+> 加载约 3 秒、单句 2.8–4.3 秒、3 轮中转约 14 秒、5 轮约 22 秒。
 
 ## Windows 免安装版（exe）
 
-Release 里附带 `grass-v2.0-win64.zip`，解压后双击 `生草机.exe` 即可运行，**不需要装 Python**。解压到中文目录（如 `生草机\`）或纯英文目录都可以。
+Release 里附带 `grass-v2.1-win64.zip`，解压后双击 **`grass.exe`** 即可运行，**不需要装 Python**。解压到中文目录（如 `生草机\`）或纯英文目录都可以。
 
-- 包里**不含模型权重**（约 2.0GB）。首次运行前把 `milmmt_model\` 放到 `生草机.exe` 同级目录，
+- 包里**不含模型权重**（约 2.0GB）。首次运行前把 `milmmt_model\` 放到 `grass.exe` 同级目录，
   或用 `GRASS_MODEL_PATH` 指向模型目录；详细步骤见包内 `模型下载说明.txt`
 - 下载：`modelscope download --model xiaomi-research/MiLMMT-46-1B-v1.0 --local_dir .\milmmt_model`
 - 默认 CPU 推理（构建的 exe 不带 CUDA 运行库）；有显卡想用 GPU 的走源码安装路径
 - 自己打包：`powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
   （需先 `pip install pyinstaller`，产物在 `dist\`）
+
+> **可执行文件名不要用中文**：v2.0 打包出来的 `生草机.exe` 在部分 Windows 11 机器上会在创建窗口时直接退出（事件日志里是 `0xC0000409` / `ucrtbase.dll`，实际是 Qt 在非 ASCII 进程名下初始化失败）。v2.1 起 exe 名改为纯 ASCII 的 `grass.exe`，窗口标题仍是"生草机"。如果你手动改名，请保持 ASCII。
 
 ## 用法
 
@@ -110,7 +100,7 @@ python main.py
 |------|------|
 | 固定 | 按设定的中转语言序列依次翻译 |
 | 低强度 | 每轮从大语种中随机选择一种语言翻译 |
-| 高强度 | 每轮从全部 38 个语种中随机选择一种翻译 |
+| 高强度 | 每轮从全部 46 个语种中随机选择一种翻译 |
 
 随机模式下可点击"排除语言..."按钮，勾选不想参与随机的语言（如英语翻译太准确，排除后生草效果更显著）。
 
@@ -146,7 +136,7 @@ v1.x 的卡顿来自「一个 Canvas 里塞整棵控件树 + 每段一套卡片�
 
 ```bash
 pip install -r requirements-dev.txt
-pytest            # 120 个用例：分段/语言链/提示词/输出清理/配置名/历史规整/文件读取/界面冒烟
+pytest            # 90 个用例：分段/语言链/提示词/输出清理/配置名/历史规整/文件读取/界面冒烟
 ```
 
 界面测试用 `QT_QPA_PLATFORM=offscreen` 离屏运行，不需要显示器；也不会加载真实模型权重
@@ -158,7 +148,7 @@ pytest            # 120 个用例：分段/语言链/提示词/输出清理/配�
 grass/
 ├── main.py              # 入口（--version 打印版本、打包版日志重定向）
 ├── version.py           # 版本号唯一来源
-├── grass_ui/            # v2.0 界面层（PySide6）
+├── grass_ui/            # 界面层（PySide6）
 │   ├── app.py           # QApplication 创建、调色板与主题
 │   ├── mainwindow.py    # 主窗口：状态、输入、翻译流程、历史、配置
 │   ├── panes.py         # 七个功能面板（输入/参数/语言/分块/控制/进度/结果）
@@ -169,13 +159,10 @@ grass/
 │   └── paths.py         # 数据目录（exe 同级 / 仓库根）
 ├── engine.py            # 翻译流程编排（分段、语言链、进度事件）
 ├── milmmt.py            # MiLMMT-46 本地推理封装（官方固定提示词、语言名映射、输出清理）
-├── m2m100.py            # M2M-100 本地推理封装
-├── hymt2.py             # Hy-MT2 本地推理封装（提示词、采样参数、输出清理）
-├── backend.py           # 按 architectures 路由到具体后端
-├── modelpath.py         # 模型目录探测与后端识别
+├── modelpath.py         # 模型目录定位（GRASS_MODEL_PATH / milmmt_model / model）
 ├── pathmirror.py        # 非 ASCII 路径下的分词器镜像
-├── langdata.py          # 各后端的语言表、分组与预设
-├── languages.py         # 语言白名单（随后端裁剪）
+├── langdata.py          # 语言表、分组、预设与简称
+├── languages.py         # 语言白名单
 ├── validators.py        # 输入校验与安全辅助（无 GUI/torch 依赖，可单测）
 ├── tests/               # pytest 用例
 ├── requirements.txt     # 运行依赖（已加版本区间）
@@ -183,7 +170,7 @@ grass/
 └── configs/             # 用户保存的配置文件
 ```
 
-**架构说明**：业务逻辑（`engine` / 后端封装 / `languages` / `validators`）与界面完全解耦，
+**架构说明**：业务逻辑（`engine` / `milmmt` / `languages` / `validators`）与界面完全解耦，
 `grass_ui` 只负责呈现与交互；因此换界面框架不影响翻译流程，反之亦然。
 
 ## 预设语言
@@ -193,24 +180,20 @@ grass/
 | 大语种 | 英语、法语、俄语、日语、西班牙语、德语、阿拉伯语 |
 | 亚洲 | 日语、韩语、泰语、越南语、印尼语、印地语、阿拉伯语 |
 | 欧洲 | 英语、法语、德语、西班牙语、俄语、意大利语、葡萄牙语 |
-| 华语变体（MiLMMT） | 中文、繁体中文、粤语 |
-| 中亚民族（MiLMMT/M2M-100） | 哈萨克语、乌兹别克语、阿塞拜疆语、土耳其语 |
-| 民族语言（Hy-MT2） | 藏语、蒙古语、维吾尔语、哈萨克语 |
+| 华语变体 | 中文、繁体中文、粤语 |
+| 中亚民族 | 哈萨克语、乌兹别克语、阿塞拜疆语、土耳其语 |
 | 随机混合 | 从 5 个地区各随机抽 1 个语言 |
 
-## 支持语言
+## 支持语言（46 个）
 
-界面列表随当前后端变化，详见 [languages.py](languages.py) 与 [langdata.py](langdata.py)：
+中文、繁体中文、粤语、日语、韩语、泰语、越南语、印尼语、马来语、菲律宾语、缅甸语、高棉语、老挝语、印地语、孟加拉语、泰米尔语、乌尔都语、阿拉伯语、希伯来语、波斯语、土耳其语、哈萨克语、阿塞拜疆语、乌兹别克语、英语、法语、德语、西班牙语、葡萄牙语、意大利语、俄语、荷兰语、波兰语、捷克语、斯洛伐克语、斯洛文尼亚语、克罗地亚语、保加利亚语、罗马尼亚语、匈牙利语、希腊语、丹麦语、瑞典语、芬兰语、挪威语、加泰罗尼亚语
 
-- **MiLMMT-46（默认，46 个）**：中文、繁体中文、粤语、日语、韩语、泰语、越南语、印尼语、马来语、菲律宾语、缅甸语、高棉语、老挝语、印地语、孟加拉语、泰米尔语、乌尔都语、阿拉伯语、希伯来语、波斯语、土耳其语、哈萨克语、阿塞拜疆语、乌兹别克语、英语、法语、德语、西班牙语、葡萄牙语、意大利语、俄语、荷兰语、波兰语、捷克语、斯洛伐克语、斯洛文尼亚语、克罗地亚语、保加利亚语、罗马尼亚语、匈牙利语、希腊语、丹麦语、瑞典语、芬兰语、挪威语、加泰罗尼亚语
-- **M2M-100**：100 个语言代码，程序暴露 76 个常用（无繁体中文/粤语/藏语/维吾尔语）
-- **Hy-MT2**：38 个语种/变体（上面那套 + 蒙古语、藏语、维吾尔语、乌克兰语等）
+没有藏语、维吾尔语、蒙古语、乌克兰语等（MiLMMT-46 官方语种表里就没有）。
 
 ## 许可
 
 - 本仓库代码：MIT，见 [LICENSE](LICENSE)。
-- **默认模型权重**：`xiaomi-research/MiLMMT-46-1B-v1.0`，由小米 MiLM Plus 开源，遵循 **Gemma 许可**（基于 `google/gemma-3-1b-pt`）。商用与再分发请阅读模型卡与 Gemma 条款，并保留出处。
-- 可选模型：`facebook/m2m100_418M`（MIT）、`tencent/Hy-MT2-1.8B`（Apache-2.0）。
+- 模型权重：`xiaomi-research/MiLMMT-46-1B-v1.0`，由小米 MiLM Plus 开源，遵循 **Gemma 许可**（基于 `google/gemma-3-1b-pt`）。商用与再分发请阅读模型卡与 Gemma 条款，并保留出处。
 - MiLMMT 模型引用：
 
 ```bibtex
@@ -222,18 +205,5 @@ grass/
   archivePrefix={arXiv},
   primaryClass={cs.CL},
   url={https://arxiv.org/abs/2608.10812}
-}
-```
-
-- Hy-MT2 模型引用：
-
-```bibtex
-@misc{zheng2026hymt2familyfastefficient,
-  title={Hy-MT2: A Family of Fast, Efficient and Powerful Multilingual Translation Models in the Wild},
-  author={Mao Zheng and Zheng Li and Tao Chen and Bo Lv and Mingrui Sun and Mingyang Song and Jinlong Song and Hong Huang and Decheng Wu and Hai Wang and Yifan Song and Yanfeng Chen and Guanwei Zhang},
-  year={2026},
-  eprint={2605.22064},
-  archivePrefix={arXiv},
-  primaryClass={cs.CL}
 }
 ```

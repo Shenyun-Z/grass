@@ -2,7 +2,7 @@
 """小米 MiLMMT-46（1B）本地推理封装
 
 模型：xiaomi-research/MiLMMT-46-1B-v1.0（Gemma 许可），默认读取程序目录下的
-milmmt_model/，可用 GRASS_MODEL_PATH 指定其他本地目录。
+milmmt_model/，可用 GRASS_MODEL_PATH 指定其他本地目录。本程序只支持这一个模型。
 
 MiLMMT-46 是 Gemma3-1B 继续训练出来的**纯解码器**翻译模型，46 个语种，
 官方要求使用固定提示词、且必须显式写出源语言（模型没有自动识别源语言的模式）：
@@ -41,7 +41,7 @@ TOKENIZER_FILES = (
     "generation_config.json",
 )
 
-_MODEL_PATH = modelpath.model_dir("milmmt")
+_MODEL_PATH = modelpath.model_dir()
 
 _MODEL = None
 _TOKENIZER = None
@@ -52,8 +52,8 @@ _TORCH = None
 _TRANSFORMERS = None
 
 # 输入语言名（中文名或英文名，大小写不敏感）→ 提示词里用的官方英文名
-_LANG_EN = {name.lower(): en for name, en in langdata.MILMMT_LANGS.items()}
-_LANG_EN.update({en.lower(): en for en in langdata.MILMMT_LANGS.values()})
+_LANG_EN = {name.lower(): en for name, en in langdata.LANGS.items()}
+_LANG_EN.update({en.lower(): en for en in langdata.LANGS.values()})
 
 _QUOTE_PAIRS = {'"': '"', "“": "”", "'": "'", "「": "」", "『": "』", "«": "»"}
 # 个别时候模型会多吐一行 "English:" 之类的标签
@@ -75,8 +75,8 @@ def lang_name(lang_name: str) -> Optional[str]:
     if not isinstance(lang_name, str):
         return None
     name = lang_name.strip()
-    if name in langdata.MILMMT_LANGS:
-        return langdata.MILMMT_LANGS[name]
+    if name in langdata.LANGS:
+        return langdata.LANGS[name]
     return _LANG_EN.get(name.lower())
 
 

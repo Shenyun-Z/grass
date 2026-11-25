@@ -1,44 +1,52 @@
 # -*- coding: utf-8 -*-
 """模型目录定位测试：源码运行用文件目录，PyInstaller 打包后用 exe 目录"""
-import importlib
 import os
 import sys
 
-import hymt2
+import modelpath
 
 
 def test_base_dir_source_mode():
-    expect = os.path.dirname(os.path.abspath(hymt2.__file__))
-    assert hymt2.base_dir() == expect
+    expect = os.path.dirname(os.path.abspath(modelpath.__file__))
+    assert modelpath.base_dir() == expect
 
 
 def test_base_dir_frozen_mode(monkeypatch):
-    fake_exe = os.path.join("C:\\", "grass", "生草机.exe")
+    fake_exe = os.path.join("C:\\", "grass", "grass.exe")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", fake_exe, raising=False)
-    assert hymt2.base_dir() == os.path.dirname(os.path.abspath(fake_exe))
+    assert modelpath.base_dir() == os.path.dirname(os.path.abspath(fake_exe))
 
 
-def test_model_path_env_wins(monkeypatch):
-    # _MODEL_PATH 在导入期解析，因此用 reload 模拟“启动前已设置环境变量”
-    target = os.path.join("C:\\", "models", "hy-mt2")
-    monkeypatch.setenv("HYMT2_MODEL_PATH", target)
-    try:
-        mod = importlib.reload(hymt2)
-        assert mod.model_path() == target
-    finally:
-        monkeypatch.delenv("HYMT2_MODEL_PATH", raising=False)
-        importlib.reload(hymt2)
+def test_env_wins(monkeypatch):
+    target = os.path.join("C:\\", "models", "milmmt_model")
+    monkeypatch.setenv("GRASS_MODEL_PATH", target)
+    assert modelpath.model_dir() == target
 
 
-def test_model_path_default_is_sibling_of_base_dir(monkeypatch):
-    monkeypatch.delenv("HYMT2_MODEL_PATH", raising=False)
-    mod = importlib.reload(hymt2)
-    assert mod.model_path() == os.path.join(mod.base_dir(), "hymt2_model")
+def test_existing_dir_preferred(monkeypatch, tmp_path):
+    monkeypatch.delenv("GRASS_MODEL_PATH", raising=False)
+    monkeypatch.setattr(modelpath, "base_dir", lambda: str(tmp_path))
+    (tmp_path / "milmmt_model").mkdir()
+    (tmp_path / "milmmt_model" / "config.json").write_text("{}", encoding="utf-8")
+    assert modelpath.model_dir().endswith("milmmt_model")
+
+
+def test_legacy_model_dir_supported(monkeypatch, tmp_path):
+    monkeypatch.delenv("GRASS_MODEL_PATH", raising=False)
+    monkeypatch.setattr(modelpath, "base_dir", lambda: str(tmp_path))
+    (tmp_path / "model").mkdir()
+    (tmp_path / "model" / "config.json").write_text("{}", encoding="utf-8")
+    assert modelpath.model_dir() == str(tmp_path / "model")
+
+
+def test_default_dir_when_nothing_found(monkeypatch, tmp_path):
+    monkeypatch.delenv("GRASS_MODEL_PATH", raising=False)
+    monkeypatch.setattr(modelpath, "base_dir", lambda: str(tmp_path))
+    assert modelpath.model_dir() == str(tmp_path / "milmmt_model")
 
 
 def test_fix_null_streams_noop_outside_frozen(monkeypatch):
-    import sys
     import main
     monkeypatch.delattr(sys, "frozen", raising=False)
     before = sys.stdout

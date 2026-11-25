@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """翻译引擎模块
 
-提供本地多语言中转翻译能力。后端由 backend.py 按模型架构路由：
-- milmmt.py：小米 MiLMMT-46（默认，1B，Gemma3 解码器）
-- m2m100.py：Meta M2M-100（418M 编码器-解码器）
-- hymt2.py：腾讯混元 Hy-MT2（可选）
+提供本地多语言中转翻译能力。模型固定为小米 MiLMMT-46（milmmt.py，1B，Gemma3 解码器），
 本模块负责分段、语言链与流程编排。
 """
 from __future__ import annotations
@@ -14,39 +11,41 @@ import random
 import threading
 from typing import Generator, List, Optional, Tuple
 
-import backend
-import hymt2
+import milmmt
 from languages import resolve, DEFAULT_PIVOT_LANGS, LANG_NAMES
 
 # 默认切分标点集合：中文/英文的常见句读标点
 DEFAULT_SPLIT_PUNCTS = "，,。.!！?？;；:：、"
 # 连续标点视为一体（如 ... ？！ ……），切分时一并划入前段
 _ALL_PUNCTS = DEFAULT_SPLIT_PUNCTS + "…"
-# 兼容旧调用点：权重检查/截断统一由后端提供
-_has_safetensors = backend.has_safetensors
+
+
+def _has_safetensors(path: str) -> bool:
+    """目录内是否有 safetensors 权重"""
+    try:
+        return any(name.endswith(".safetensors") for name in os.listdir(path))
+    except OSError:
+        return False
 
 
 def _truncate_to_max_len(text, tokenizer, max_len=None):
-    """按后端的上限截断文本（max_len 省略时取后端上限）"""
+    """按模型的输入上限截断文本（max_len 省略时取上限）"""
     if max_len is None:
         max_len = _max_input_len()
-    return backend.truncate_to_max_len(text, tokenizer, max_len)
+    return milmmt.truncate_to_max_len(text, tokenizer, max_len)
 
 
 def _max_input_len() -> int:
-    """当前后端的输入上限（按 token 计）"""
-    try:
-        return backend.max_input_tokens()
-    except Exception:
-        return hymt2.MAX_INPUT_TOKENS
+    """模型的输入上限（按 token 计）"""
+    return milmmt.MAX_INPUT_TOKENS
 
 # 计算设备：惰性解析（首次用到才检测），避免模块导入期依赖 CUDA / torch
 _DEVICE: Optional[str] = None
 
 
 def _torch():
-    """惰性导入 torch（委托给后端模块，保持旧调用点可用）"""
-    return backend.module().torch()
+    """惰性导入 torch"""
+    return milmmt.torch()
 
 
 def _device() -> str:
@@ -69,7 +68,7 @@ def _device() -> str:
 
 def _get_model():
     """加载并缓存模型（供界面预热调用，真正的推理在后端模块内完成）"""
-    return backend.get_model(_device())
+    return milmmt.get_model(_device())
 
 
 def get_device_info() -> str:
@@ -90,16 +89,16 @@ def get_device_info() -> str:
 def get_model_info() -> str:
     """返回模型信息，供界面显示"""
     try:
-        return backend.model_label()
+        return milmmt.model_label()
     except Exception:
-        return f"未知模型 · {os.path.basename(os.path.normpath(backend.model_path()))}"
+        return f"未知模型 · {os.path.basename(os.path.normpath(milmmt.model_path()))}"
 
 
 def _clear_cuda_cache():
     """推理后释放 CUDA 缓存，避免多段连续推理时显存累积"""
     if _DEVICE == "cuda":
         try:
-            backend.clear_cuda_cache(_DEVICE)
+            milmmt.clear_cuda_cache(_DEVICE)
         except Exception:
             pass
 
@@ -115,7 +114,7 @@ def _resolve_pair(src_lang: str, tgt_lang: str) -> Tuple[str, str]:
     tgt = resolve(tgt_lang)
     if src is None or tgt is None:
         try:
-            name = backend.model_label()
+            name = milmmt.model_label()
         except Exception:
             name = "当前模型"
         raise ValueError(
@@ -128,7 +127,7 @@ def translate_once(text: str, src_lang: str, tgt_lang: str) -> str:
     src, tgt = _resolve_pair(src_lang, tgt_lang)
     tokenizer, _model = _get_model()
     safe_text = _truncate_to_max_len(text, tokenizer, _max_input_len())
-    return _clean(backend.translate(safe_text, src, tgt, _device()))
+    return _clean(milmmt.translate(safe_text, src, tgt, _device()))
 
 
 def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
@@ -165,7 +164,7 @@ def translate_batch(texts: List[str], src_lang: str, tgt_lang: str,
                 break
             # 逐条校验 token 长度，超限时显式截断，避免静默乱码
             safe_text = _truncate_to_max_len(text, tokenizer, max_len)
-            results[i] = _clean(backend.translate(safe_text, src, tgt, device))
+            results[i] = _clean(milmmt.translate(safe_text, src, tgt, device))
     finally:
         _clear_cuda_cache()
     return results
@@ -180,16 +179,14 @@ def classify_translate_error(exc: BaseException) -> str:
     msg = str(exc)
     lowered = msg.lower()
     if isinstance(exc, FileNotFoundError) or "不存在" in msg:
-        return ("模型文件缺失：请确认模型目录（默认 milmmt_model/、m2m100_model/ "
-                "或 hymt2_model/）内有完整权重（或将 GRASS_MODEL_PATH 指向本地模型目录）。")
+        return ("模型文件缺失：请确认 milmmt_model/ 内有完整权重"
+                "（或将 GRASS_MODEL_PATH 指向本地模型目录）。")
     if isinstance(exc, ValueError) and ("不支持的语言" in msg or "语言代码" in msg):
         return f"语言配置非法：{msg} 请在语言选择中选用支持的语种。"
     if "out of memory" in lowered or "显存" in msg:
         return "显存不足（CUDA out of memory）：请关闭其他占用显存的程序，或设置 GRASS_DEVICE=cpu 改用 CPU 推理。"
     if isinstance(exc, ImportError) or "缺少依赖" in msg or "no module named" in lowered:
         return f"依赖缺失：{msg} 请先 pip install -r requirements.txt。"
-    if "trust_remote_code" in lowered:
-        return ("模型需要加载自定义代码：确认为可信来源后，设置 GRASS_HYMT2_TRUST_REMOTE_CODE=1 再启动。")
     if "无法识别模型架构" in msg:
         return f"模型配置异常：{msg}"
     return f"翻译失败：{msg}"
