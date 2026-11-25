@@ -1,8 +1,8 @@
 # 生草机 (Grass Machine)
 
-多语种中转翻译，制造"生草"文本。当前版本：**v2.1**（`python main.py --version` 可查看）。
+多语种中转翻译，制造"生草"文本。当前版本：**v2.0**（`python main.py --version` 可查看）。
 
-> **v2.1：只支持小米 MiLMMT-46 一个模型**，M2M-100 与 Hy-MT2 的后端代码、语言表、预设与打包项全部移除，代码更短、启动路径更简单。
+> **v2.0：只支持小米 MiLMMT-46 一个模型**，M2M-100 与 Hy-MT2 的后端代码、语言表、预设与打包项全部移除，代码更短、启动路径更简单。
 >
 > **v2.0 起界面用 PySide6（Qt）完全重写**：分块预览与对照视图改成虚拟化列表，拖动窗口、滚动、流式出结果都不再重排整棵控件树；并新增 Ctrl+滚轮调字号。
 
@@ -56,7 +56,7 @@ set GRASS_DEVICE=cuda   # 强制使用 GPU（无显卡时会报错）
 
 ## Windows 免安装版（exe）
 
-Release 里附带 `grass-v2.1-win64.zip`，解压后双击 **`grass.exe`** 即可运行，**不需要装 Python**。解压到中文目录（如 `生草机\`）或纯英文目录都可以。
+Release 里附带 `grass-v2.0-win64.zip`，解压后双击 **`grass.exe`** 即可运行，**不需要装 Python**。解压到中文目录（如 `生草机\`）或纯英文目录都可以。
 
 - 包里**不含模型权重**（约 2.0GB）。首次运行前把 `milmmt_model\` 放到 `grass.exe` 同级目录，
   或用 `GRASS_MODEL_PATH` 指向模型目录；详细步骤见包内 `模型下载说明.txt`
@@ -65,7 +65,7 @@ Release 里附带 `grass-v2.1-win64.zip`，解压后双击 **`grass.exe`** 即�
 - 自己打包：`powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1`
   （需先 `pip install pyinstaller`，产物在 `dist\`）
 
-> **可执行文件名不要用中文**：v2.0 打包出来的 `生草机.exe` 在部分 Windows 11 机器上会在创建窗口时直接退出（事件日志里是 `0xC0000409` / `ucrtbase.dll`，实际是 Qt 在非 ASCII 进程名下初始化失败）。v2.1 起 exe 名改为纯 ASCII 的 `grass.exe`，窗口标题仍是"生草机"。如果你手动改名，请保持 ASCII。
+> **可执行文件名不要用中文**：中文名的 `生草机.exe` 在部分 Windows 11 机器上会在创建窗口时直接退出（事件日志里是 `0xC0000409` / `ucrtbase.dll`，实际是 Qt 在非 ASCII 进程名下初始化失败）。本版 exe 名是纯 ASCII 的 `grass.exe`，窗口标题仍是“生草机”；手动改名也请保持 ASCII。
 
 ## 用法
 
